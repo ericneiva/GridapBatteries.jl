@@ -138,6 +138,10 @@ module Battery1OnlyConcentration
 
   j_Γ(t::Real) = 0.0
   g_Γ = (u⁺,u⁻) -> √(u⁻*u⁺*(1-u⁺))
+  # - What do other authors do?
+  # - Taylor expansion?
+  # - Regularisation? [Bonilla]
+  # - Complex?
 
   m(u,v,dΩ) = ∫( ∂t(u)*v )dΩ
 
@@ -157,7 +161,7 @@ module Battery1OnlyConcentration
       c(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el)
   JAC(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     a(t,du_ed,v_ed,k_ed,dΩ_ed) +
-    a(t,du_el,v_el,k_el,dΩ_el) # + c term
+    a(t,du_el,v_el,k_el,dΩ_el) # + ADD c TERM
   JAC_t(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     jac_t(du_ed,v_ed,dΩ_ed) +
     jac_t(du_el,v_el,dΩ_el)
@@ -174,7 +178,7 @@ module Battery1OnlyConcentration
   θ = 0.5
   ode_solver = ThetaMethod(nls,Δt,θ)
 
-  u₀ = interpolate_everywhere([u(0.0),u(0.0),u(0.0)],X(0.0))
+  u₀ = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
   t₀ = 0.0
   T = 1.0
 

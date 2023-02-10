@@ -1,4 +1,4 @@
-module TransientPoissonAgFEMTests
+module TransientTrimaterialPoissonAgFEMTests
 
   using Gridap
   using GridapEmbedded
@@ -59,7 +59,7 @@ module TransientPoissonAgFEMTests
 
   # Background model
 
-  n = 40
+  n = 30
   domain = (-1.0,1.0,-1.0,1.0,-1.0,1.0)
   partition = (n,n,n)
 
@@ -128,47 +128,53 @@ module TransientPoissonAgFEMTests
   Vstd_el = TestFESpace(Ω_A_el,reffe,dirichlet_tags="boundary")
   V_el    = AgFEMSpace(Vstd_el,aggregate(strategy,cutgeo,electrolyte))
 
-  u(x,t::Real) = t * ( x[1] + x[2] + x[3] )
-  u(t::Real)   = x -> u(x,t)
+  υ(x,t::Real) = t * ( x[1] + x[2] + x[3] )
+  υ(t::Real) = x -> υ(x,t)
+
+  k_ed(t::Real) = 1.0
+  k_bd(t::Real) = 1.5
+  k_el(t::Real) = 2.0
+
+  # Solution of the problem
+
+  u_ed(x,t::Real) = k_ed(t) * υ(x,t)
+  u_bd(x,t::Real) = k_bd(t) * υ(x,t)
+  u_el(x,t::Real) = k_el(t) * υ(x,t)
+
+  u_ed(t::Real) = x -> u_ed(x,t)
+  u_bd(t::Real) = x -> u_bd(x,t)
+  u_el(t::Real) = x -> u_el(x,t)
 
   U_ed = TransientTrialFESpace(V_ed) # No Dirichlet boundary
-  U_bd = TransientTrialFESpace(V_bd,u)
-  U_el = TransientTrialFESpace(V_el,u)
+  U_bd = TransientTrialFESpace(V_bd,u_bd)
+  U_el = TransientTrialFESpace(V_el,u_el)
 
   Y = MultiFieldFESpace([V_ed,V_bd,V_el])
   X = TransientMultiFieldFESpace([U_ed,U_bd,U_el])  
 
   # Weak form
 
-  ### Rmk. Material params. can be spatially-dependent, if needed.
-
-  ## Conductivities
-
-  k_ed(t::Real) = 1.0
-  k_bd(t::Real) = 2.0
-  k_el(t::Real) = 1.5
-
   ## Jumps, weights and averages
 
   j(u⁺,u⁻) = u⁺ - u⁻
-  w(k¹,k²) = t -> k²(t) / ( k¹(t) + k²(t) )
+  υ(k¹,k²) = t -> k²(t) / ( k¹(t) + k²(t) )
   ħ(k⁺,k⁻) = t -> ( 2.0 * k⁺(t) * k⁻(t) ) / ( k⁺(t) + k⁻(t) )
 
-  μ(u⁺,u⁻,k⁺,k⁻) = t -> w(k⁺,k⁻)(t) * u⁺ + w(k⁻,k⁺)(t) * u⁻
+  μ(u⁺,u⁻,k⁺,k⁻) = t -> υ(k⁺,k⁻)(t) * u⁺ + υ(k⁻,k⁺)(t) * u⁻
 
   ## Source and transmission terms
 
-  f(k,x,t::Real) = ∂t(u)(t)(x) - k(t) * Δ(u(t))(x)
+  f(k,x,t::Real) = k(t) * ( ∂t(υ)(t)(x) - Δ(υ(t))(x) )
   f(k,t::Real) = x -> f(k,x,t)
 
-  j_Γ(t::Real) = 0.0
-  g_Γ(k⁺,k⁻,t::Real) = x -> ( k⁺(t) - k⁻(t) ) * ∇(u(t))(x)
+  j_Γ(k⁺,k⁻,t::Real) = x -> ( k⁺(t) - k⁻(t) ) * υ(x,t)
+  g_Γ(k⁺,k⁻,t::Real) = x -> ( k⁺(t) - k⁻(t) ) * ∇(υ(t))(x)
 
-  γd = 20.0 # Nitsche coefficient for Nitsche's method
+  γd = 10.0 # Nitsche coefficient for Nitsche's method
 
   m(u,v,dΩ) = ∫( ∂t(u)*v )dΩ
 
-  a(t,u,v,k,dΩ) = ∫( k(t)*(∇(u)⋅∇(v)) )dΩ
+  a(t,u,v,dΩ) = ∫( ∇(u)⋅∇(v) )dΩ
 
   b(t,u⁺,u⁻,v⁺,v⁻,k⁺,k⁻,dΓ,n_Γ) = 
     ∫( (γd*ħ(k⁺,k⁻)(t)/h)*j(u⁺,u⁻)*j(v⁺,v⁻)
@@ -178,11 +184,11 @@ module TransientPoissonAgFEMTests
   l(t,v,k,dΩ) = ∫( v*f(k,t) )dΩ
 
   c(t,v⁺,v⁻,k⁺,k⁻,dΓ,n_Γ) = 
-    ∫( (γd*ħ(k⁺,k⁻)(t)/h)*j_Γ(t)*j(v⁺,v⁻)
-     - (n_Γ⋅μ(∇(v⁺),∇(v⁻),k⁺,k⁻)(t))*j_Γ(t)
-     + (g_Γ(k⁺,k⁻,t)⋅n_Γ)*(w(k⁻,k⁺)(t)*v⁺ + w(k⁺,k⁻)(t)*v⁻) )dΓ
+    ∫( (γd*ħ(k⁺,k⁻)(t)/h)*(j_Γ(k⁺,k⁻,t)*j(v⁺,v⁻))
+     - (n_Γ⋅μ(∇(v⁺),∇(v⁻),k⁺,k⁻)(t))*j_Γ(k⁺,k⁻,t)
+     + (g_Γ(k⁺,k⁻,t)⋅n_Γ)*(υ(k⁻,k⁺)(t)*v⁺ + υ(k⁺,k⁻)(t)*v⁻) )dΓ
 
-  res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(t,u,v,k,dΩ) - l(t,v,k,dΩ)
+  res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(t,u,v,dΩ) - l(t,v,k,dΩ)
 
   jac_t(dut,v,dΩ) = ∫( dut*v )dΩ
 
@@ -197,9 +203,9 @@ module TransientPoissonAgFEMTests
                 c(t,v_ed,v_el,k_ed,k_el,dΓ_ed_el,n_Γ_ed_el) -
                 c(t,v_bd,v_el,k_bd,k_el,dΓ_bd_el,n_Γ_bd_el)
   JAC(t,(u_ed,u_bd,u_el),(du_ed,du_bd,du_el),(v_ed,v_bd,v_el)) = 
-    a(t,du_ed,v_ed,k_ed,dΩ_ed) +
-    a(t,du_bd,v_bd,k_bd,dΩ_bd) +
-    a(t,du_el,v_el,k_el,dΩ_el) +
+    a(t,du_ed,v_ed,dΩ_ed) +
+    a(t,du_bd,v_bd,dΩ_bd) +
+    a(t,du_el,v_el,dΩ_el) +
     b(t,du_ed,du_bd,v_ed,v_bd,k_ed,k_bd,dΓ_ed_bd,n_Γ_ed_bd) +
     b(t,du_ed,du_el,v_ed,v_el,k_ed,k_el,dΓ_ed_el,n_Γ_ed_el) +
     b(t,du_bd,du_el,v_bd,v_el,k_bd,k_el,dΓ_bd_el,n_Γ_bd_el)
@@ -219,7 +225,7 @@ module TransientPoissonAgFEMTests
   θ = 0.5
   ode_solver = ThetaMethod(linear_solver,Δt,θ)
 
-  u₀ = interpolate_everywhere([u(0.0),u(0.0),u(0.0)],X(0.0))
+  u₀ = interpolate_everywhere([u_ed(0.0),u_bd(0.0),u_el(0.0)],X(0.0))
   t₀ = 0.0
   T = 1.0
 
@@ -235,8 +241,8 @@ module TransientPoissonAgFEMTests
     pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
     for (i,((_u_ed,_u_bd,_u_el),t)) in enumerate(uₕₜ)
       pvd[t] = createvtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-      el2 = el2 + l2(u(t)-_u_ed,dΩ_ed) + l2(u(t)-_u_bd,dΩ_bd) + l2(u(t)-_u_el,dΩ_el)
-      eh1 = eh1 + h1(u(t)-_u_ed,dΩ_ed) + h1(u(t)-_u_bd,dΩ_bd) + h1(u(t)-_u_el,dΩ_el)
+      el2 = el2 + l2(u_ed(t)-_u_ed,dΩ_ed) + l2(u_bd(t)-_u_bd,dΩ_bd) + l2(u_el(t)-_u_el,dΩ_el)
+      eh1 = eh1 + h1(u_ed(t)-_u_ed,dΩ_ed) + h1(u_bd(t)-_u_bd,dΩ_bd) + h1(u_el(t)-_u_el,dΩ_el)
       ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_bd,dΩ_bd) + l2(_u_el,dΩ_el)
       uh1 = uh1 + h1(_u_ed,dΩ_ed) + h1(_u_bd,dΩ_bd) + h1(_u_el,dΩ_el)
     end

@@ -59,7 +59,7 @@ module Battery1OnlyConcentration
 
   # Background model
 
-  n = 40
+  n = 30
   domain = (-1.0,1.0,-1.0,1.0,-1.0,1.0)
   partition = (n,n,n)
 
@@ -115,7 +115,7 @@ module Battery1OnlyConcentration
  
   ## Manufactured solution
 
-  u(x,t::Real) = ( x[1]^2 + x[2]^2 + x[3]^2 ) + 0.1 * t
+  u(x,t::Real) = (1-0.1*t)*(x[1]^2+x[2]^2+x[3]^2)/6.0
   u(t::Real)   = x -> u(x,t)
 
   ## Conductivities
@@ -133,11 +133,14 @@ module Battery1OnlyConcentration
 
   ## Source and transmission terms
 
+  ### Rmk. Homogeneous Neumann BCs
+
   f(k,x,t::Real) = ∂t(u)(t)(x) - k(t) * Δ(u(t))(x)
   f(k,t::Real) = x -> f(k,x,t)
 
   j_Γ(t::Real) = 0.0
   g_Γ = (u⁺,u⁻) -> √(u⁻*u⁺*(1-u⁺))
+  dg_Γ = (u⁺,u⁻) -> (u⁺+u⁻-2*u⁺*u⁻-u⁺*u⁺)/(2*√(u⁻*u⁺*(1-u⁺))) # At zero?
 
   m(u,v,dΩ) = ∫( ∂t(u)*v )dΩ
 
@@ -146,6 +149,11 @@ module Battery1OnlyConcentration
   l(t,v,k,dΩ) = ∫( v*f(k,t) )dΩ
 
   c(t,u⁺,u⁻,v⁺,v⁻,dΓ) = ∫( g_Γ∘(u⁺,u⁻)*j(v⁺,v⁻) )dΓ
+
+  dc(t,u⁺,u⁻,v⁺,v⁻,dΓ) = ∫( dg_Γ∘(u⁺,u⁻)*j(v⁺,v⁻) )dΓ
+  
+  u1, u2 = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
+  v1, v2 = get_fe_basis(Y)
 
   res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(t,u,v,k,dΩ) - l(t,v,k,dΩ)
 
@@ -157,7 +165,8 @@ module Battery1OnlyConcentration
       c(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el)
   JAC(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     a(t,du_ed,v_ed,k_ed,dΩ_ed) +
-    a(t,du_el,v_el,k_el,dΩ_el) # + ADD c TERM
+    a(t,du_el,v_el,k_el,dΩ_el) +
+     dc(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el)
   JAC_t(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     jac_t(du_ed,v_ed,dΩ_ed) +
     jac_t(du_el,v_el,dΩ_el)
@@ -169,6 +178,7 @@ module Battery1OnlyConcentration
 
   using LineSearches: BackTracking
   nls = NLSolver(show_trace=true, method=:newton, linesearch=BackTracking())
+  # nls = NLSolver(show_trace=true, method=:anderson, m=0)
 
   Δt = 0.5
   θ = 0.5
@@ -184,6 +194,11 @@ module Battery1OnlyConcentration
 
   l2(u,dΩ) = ∑( ∫( u*u )dΩ )
   h1(u,dΩ) = ∑( ∫( u*u + ∇(u)⋅∇(u) )dΩ )
+
+  # using Gridap.ODEs.ODETools
+  # cache = nothing
+  # uᵢ = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
+  # uᵢ, tᵢ, cache = solve_step!(uᵢ,ode_solver,op,u₀,t₀)
 
   createpvd("TransientPoissonAgFEM") do pvd
     el2 = 0.0; eh1 = 0.0; ul2 = 0.0; uh1 = 0.0

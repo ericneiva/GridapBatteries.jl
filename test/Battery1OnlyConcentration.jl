@@ -115,7 +115,7 @@ module Battery1OnlyConcentration
  
   ## Manufactured solution
 
-  u(x,t::Real) = 0.1 * t * ( x[1] + x[2] + x[3] )
+  u(x,t::Real) = ( x[1]^2 + x[2]^2 + x[3]^2 ) + 0.1 * t
   u(t::Real)   = x -> u(x,t)
 
   ## Conductivities
@@ -138,10 +138,6 @@ module Battery1OnlyConcentration
 
   j_Γ(t::Real) = 0.0
   g_Γ = (u⁺,u⁻) -> √(u⁻*u⁺*(1-u⁺))
-  # - What do other authors do?
-  # - Taylor expansion?
-  # - Regularisation? [Bonilla]
-  # - Complex?
 
   m(u,v,dΩ) = ∫( ∂t(u)*v )dΩ
 

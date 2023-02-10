@@ -59,7 +59,7 @@ module TransientTrimaterialPoissonAgFEMTests
 
   # Background model
 
-  n = 40
+  n = 30
   domain = (-1.0,1.0,-1.0,1.0,-1.0,1.0)
   partition = (n,n,n)
 

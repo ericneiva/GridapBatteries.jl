@@ -138,9 +138,14 @@ module Battery1OnlyConcentration
   f(k,x,t::Real) = ∂t(u)(t)(x) - k(t) * Δ(u(t))(x)
   f(k,t::Real) = x -> f(k,x,t)
 
-  j_Γ(t::Real) = 0.0
-  g_Γ = (u⁺,u⁻) -> √(u⁻*u⁺*(1-u⁺))
-  dg_Γ = (u⁺,u⁻) -> (u⁺+u⁻-2*u⁺*u⁻-u⁺*u⁺)/(2*√(u⁻*u⁺*(1-u⁺))) # At zero?
+
+  σ = 1.0e-06
+  s(f) = (f+√(f*f+σ))/2.0
+  ds(f) = (1+f/√(f*f+σ))/2.0
+
+  g_Γ = (u⁺,u⁻) -> √(s(u⁻)*s(u⁺)*s(1-u⁺))
+  dg⁺_Γ = (u⁺,u⁻) -> (s(u⁻)*(-s(u⁺)*ds(1-u⁺)+s(1-u⁺)*ds(u⁺)))/(2.0*√(s(u⁻)*s(1-u⁺)s(u⁺)))
+  dg⁻_Γ = (u⁺,u⁻) -> (√(s(u⁻)*s(1-u⁺)*s(u⁺))*ds(u⁻))/(2*s(u⁻))
 
   m(u,v,dΩ) = ∫( ∂t(u)*v )dΩ
 
@@ -150,15 +155,15 @@ module Battery1OnlyConcentration
 
   c(t,u⁺,u⁻,v⁺,v⁻,dΓ) = ∫( g_Γ∘(u⁺,u⁻)*j(v⁺,v⁻) )dΓ
 
-  dc(t,u⁺,u⁻,v⁺,v⁻,dΓ) = ∫( dg_Γ∘(u⁺,u⁻)*j(v⁺,v⁻) )dΓ
-  
-  u1, u2 = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
-  v1, v2 = get_fe_basis(Y)
+  dc(t,u⁺,u⁻,du⁺,du⁻,v⁺,v⁻,dΓ) = ∫( (dg⁺_Γ∘(u⁺,u⁻)*du⁺+dg⁻_Γ∘(u⁺,u⁻)*du⁻)*j(v⁺,v⁻) )dΓ
+
+  # u1, u2 = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
+  # du1, du2 = get_trial_fe_basis(X(0.0))
+  # v1, v2 = get_fe_basis(Y)
 
   res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(t,u,v,k,dΩ) - l(t,v,k,dΩ)
 
   jac_t(dut,v,dΩ) = ∫( dut*v )dΩ
-
   RES(t,(u_ed,u_el),(v_ed,v_el)) = 
     res(t,u_ed,v_ed,k_ed,dΩ_ed) + 
     res(t,u_el,v_el,k_el,dΩ_el) -
@@ -166,7 +171,7 @@ module Battery1OnlyConcentration
   JAC(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     a(t,du_ed,v_ed,k_ed,dΩ_ed) +
     a(t,du_el,v_el,k_el,dΩ_el) +
-     dc(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el)
+     dc(t,u_ed,u_el,du_ed,du_el,v_ed,v_el,dΓ_ed_el)
   JAC_t(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     jac_t(du_ed,v_ed,dΩ_ed) +
     jac_t(du_el,v_el,dΩ_el)
@@ -209,6 +214,7 @@ module Battery1OnlyConcentration
       eh1 = eh1 + h1(u(t)-_u_ed,dΩ_ed) + h1(u(t)-_u_el,dΩ_el)
       ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
       uh1 = uh1 + h1(_u_ed,dΩ_ed) + h1(_u_el,dΩ_el)
+      stop
     end
     el2 = √(Δt*el2)
     eh1 = √(Δt*eh1) # (!) Not scaled by diffusion

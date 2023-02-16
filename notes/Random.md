@@ -26,3 +26,11 @@
   du_bd = get_trial_fe_basis(U_bd(0.0))
 
   c(0.0,dv_ed,dv_bd,k_ed,k_bd,dΓ_ed_bd,n_Γ_ed_bd)
+
+* Remember conditions
+* Implement smoothed version
+* Use Authomatic Differentiation?
+
+* beta proportional maximum diffusion and maximum of gradient (1/h)
+
+* The directional derivative is computed with the Taylor expansion!!!

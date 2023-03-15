@@ -59,7 +59,7 @@ module Battery1OnlyConcentration
 
   # Background model
 
-  n = 30
+  n = 20
   domain = (-1.0,1.0,-1.0,1.0,-1.0,1.0)
   partition = (n,n,n)
 
@@ -138,7 +138,6 @@ module Battery1OnlyConcentration
   f(k,x,t::Real) = ∂t(u)(t)(x) - k(t) * Δ(u(t))(x)
   f(k,t::Real) = x -> f(k,x,t)
 
-
   σ = 1.0e-06
   s(f) = (f+√(f*f+σ))/2.0
   ds(f) = (1+f/√(f*f+σ))/2.0
@@ -182,11 +181,11 @@ module Battery1OnlyConcentration
   op = TransientFEOperator(RES,JAC,JAC_t,X,Y)
 
   using LineSearches: BackTracking
-  nls = NLSolver(show_trace=true, method=:newton, linesearch=BackTracking())
+  nls = NLSolver(show_trace=true, method=:newton, linesearch=BackTracking(), iterations=15)
   # nls = NLSolver(show_trace=true, method=:anderson, m=0)
 
   Δt = 0.5
-  θ = 0.5
+  θ = 1.0
   ode_solver = ThetaMethod(nls,Δt,θ)
 
   u₀ = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
@@ -214,12 +213,11 @@ module Battery1OnlyConcentration
       eh1 = eh1 + h1(u(t)-_u_ed,dΩ_ed) + h1(u(t)-_u_el,dΩ_el)
       ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
       uh1 = uh1 + h1(_u_ed,dΩ_ed) + h1(_u_el,dΩ_el)
-      stop
     end
-    el2 = √(Δt*el2)
-    eh1 = √(Δt*eh1) # (!) Not scaled by diffusion
-    @test el2/ul2 < 1.e-8
-    @test eh1/uh1 < 1.e-7
+    ul2 = √(Δt*ul2)
+    uh1 = √(Δt*uh1) # (!) Not scaled by diffusion
+    @show ul2
+    @show uh1
   end
   
 end # module

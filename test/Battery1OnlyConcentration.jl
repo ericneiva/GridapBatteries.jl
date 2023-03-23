@@ -103,11 +103,13 @@ module Battery1OnlyConcentration
     Vstd_ed = TestFESpace(Ω_A_ed,reffe)
     V_ed    = AgFEMSpace(Vstd_ed,aggregate(strategy,cutgeo,electrode))
 
-    Vstd_el = TestFESpace(Ω_A_el,reffe)
+    Vstd_el = TestFESpace(Ω_A_el,reffe,dirichlet_tags="boundary")
     V_el    = AgFEMSpace(Vstd_el,aggregate(strategy,cutgeo,electrolyte))
   
     U_ed = TransientTrialFESpace(V_ed)
-    U_el = TransientTrialFESpace(V_el)
+    ud(x,t::Real) = 1.0
+    ud(t::Real)   = x -> ud(x,t)
+    U_el = TransientTrialFESpace(V_el,ud)
 
     Y = MultiFieldFESpace([V_ed,V_el])
     X = TransientMultiFieldFESpace([U_ed,U_el])  
@@ -183,16 +185,16 @@ module Battery1OnlyConcentration
     # op = TransientFEOperator(RES,X,Y) # Jacobian computed with AD (slower)
     op = TransientFEOperator(RES,JAC,JAC_t,X,Y)
 
-    nls = NLSolver(show_trace=true, method=:newton, linesearch=BackTracking(), iterations=15)
-    # nls = NLSolver(show_trace=true, method=:anderson, m=0)
+    nls = NLSolver(show_trace=true, method=:newton, linesearch=BackTracking(), iterations=20)
 
-    Δt = 0.1
+    Δt = 0.004
     θ = 1.0
-    ode_solver = ThetaMethod(nls,Δt,θ)
+    ode_solver = ThetaMethod(nls,Δt,θ) # RungeKutta(nls,Δt,:TRBDF2_3_3_2) fails / ask bugfix
     t₀ = 0.0
     T = 1.0
 
-    u_ed₀ = 0.5; u_el₀ = 1.0
+    u_ed₀ = interpolate_everywhere(0.5,U_ed(t₀))
+    u_el₀ = interpolate_everywhere(1.0,U_el(t₀))
     u₀ = interpolate_everywhere([u_ed₀,u_el₀],X(t₀))
 
     uₕₜ = solve(ode_solver,op,u₀,t₀,T)

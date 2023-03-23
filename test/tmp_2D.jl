@@ -199,11 +199,11 @@ module Battery1OnlyConcentration
     # uᵢ, tᵢ, cache = solve_step!(uᵢ,ode_solver,op,u₀,t₀)
 
     ul2 = 0.0; uh1 = 0.0
-    writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
-    writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>u₀[2]])
-    for (i,((_u_ed,_u_el),t)) in enumerate(uₕₜ)
-      writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-      writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
+    # writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
+    # writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>u₀[2]])
+    for (i,((_u_ed,_u_el),t),state) in enumerate(uₕₜ)   
+      # writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+      # writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
       @info "Time step $i"
       ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
       uh1 = uh1 + k_ed(t)*h1(_u_ed,dΩ_ed) + k_el(t)*h1(_u_el,dΩ_el)

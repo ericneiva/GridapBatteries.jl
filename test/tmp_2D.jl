@@ -11,46 +11,36 @@ module Battery1OnlyConcentration
 
     R = 0.38
 
-    p1 = Point(-0.5,-0.5,-0.5)
-    p2 = Point( 0.5,-0.5,-0.5)
-    p3 = Point(-0.5, 0.5,-0.5)
-    p4 = Point( 0.5, 0.5,-0.5)
-    p5 = Point(-0.5,-0.5, 0.5)
-    p6 = Point( 0.5,-0.5, 0.5)
-    p7 = Point(-0.5, 0.5, 0.5)
-    p8 = Point( 0.5, 0.5, 0.5)
+    p1 = Point(-0.5,-0.5)
+    p2 = Point( 0.5,-0.5)
+    p3 = Point(-0.5, 0.5)
+    p4 = Point( 0.5, 0.5)
 
-    sph1 = sphere(R,x0=p1)
-    sph2 = sphere(R,x0=p2)
-    sph3 = sphere(R,x0=p3)
-    sph4 = sphere(R,x0=p4)
-    sph5 = sphere(R,x0=p5)
-    sph6 = sphere(R,x0=p6)
-    sph7 = sphere(R,x0=p7)
-    sph8 = sphere(R,x0=p8)
+    sph1 = disk(R,x0=p1)
+    sph2 = disk(R,x0=p2)
+    sph3 = disk(R,x0=p3)
+    sph4 = disk(R,x0=p4)
 
-    r = 0.24
+    rx = Point(0.24,0.0)
+    v1  = VectorValue(1.0,0.0)
+    v2  = VectorValue(-1.0,0.0)
 
-    v1    = VectorValue(0.0,0.0,1.0)
-    cyl1  = cylinder(r,x0=p1,v=v1)
-    cyl2  = cylinder(r,x0=p2,v=v1)
-    cyl3  = cylinder(r,x0=p3,v=v1)
-    cyl4  = cylinder(r,x0=p4,v=v1)
+    pl1 = plane(x0=p1+rx,v=v1)
+    pl2 = plane(x0=p2+rx,v=v1)
+    pl3 = plane(x0=p1-rx,v=v2)
+    pl4 = plane(x0=p2-rx,v=v2)
 
-    v2    = VectorValue(1.0,0.0,0.0)
-    cyl5  = cylinder(r,x0=p1,v=v2)
-    cyl6  = cylinder(r,x0=p3,v=v2)
-    cyl7  = cylinder(r,x0=p5,v=v2)
-    cyl8  = cylinder(r,x0=p7,v=v2)
+    ry = Point(0.0,0.24)
+    v3  = VectorValue(0.0,1.0)
+    v4  = VectorValue(0.0,-1.0)
+    
+    pl5 = plane(x0=p1+ry,v=v3)
+    pl6 = plane(x0=p3+ry,v=v3)
+    pl7 = plane(x0=p1-ry,v=v4)
+    pl8 = plane(x0=p3-ry,v=v4)
 
-    v3    = VectorValue(0.0,1.0,0.0)
-    cyl9  = cylinder(r,x0=p1,v=v3)
-    cyl10 = cylinder(r,x0=p2,v=v3)
-    cyl11 = cylinder(r,x0=p5,v=v3)
-    cyl12 = cylinder(r,x0=p6,v=v3)
-
-    _sphs = union(union(union(union(union(union(union(sph1,sph2),sph3),sph4),sph5),sph6),sph7),sph8)
-    _cyls = union(union(union(union(union(union(union(union(union(union(union(cyl1,cyl2),cyl3),cyl4),cyl5),cyl6),cyl7),cyl8),cyl9),cyl10),cyl11),cyl12)
+    _sphs = union(union(union(sph1,sph2),sph3),sph4)
+    _cyls = union(union(union(intersect(pl1,pl3),intersect(pl2,pl4)),intersect(pl5,pl7)),intersect(pl6,pl8))
 
     # Warning: Touching can have unexpected consequences and likely break the code
     electrode   = _sphs
@@ -62,9 +52,9 @@ module Battery1OnlyConcentration
 
     # Background model
 
-    n = 20
-    domain = (-1.0,1.0,-1.0,1.0,-1.0,1.0)
-    partition = (n,n,n)
+    n = 120
+    domain = (-1.0,1.0,-1.0,1.0)
+    partition = (n,n)
 
     bgmodel = CartesianDiscreteModel(domain,partition)
     h = (domain[2]-domain[1])/n
@@ -86,7 +76,7 @@ module Battery1OnlyConcentration
 
     # Lebesgue measures
 
-    dim = 3
+    dim = 2
     order = 1
     degree = 2*order*dim
 
@@ -118,7 +108,7 @@ module Battery1OnlyConcentration
   
     ## Manufactured solution
 
-    u(x,t::Real) = (1-0.1*t)*(x[1]^2+x[2]^2+x[3]^2)/6.0
+    u(x,t::Real) = (1-0.1*t)*(x[1]^2+x[2]^2)/4.0
     u(t::Real)   = x -> u(x,t)
 
     ## Conductivities
@@ -186,13 +176,14 @@ module Battery1OnlyConcentration
     nls = NLSolver(show_trace=true, method=:newton, linesearch=BackTracking(), iterations=15)
     # nls = NLSolver(show_trace=true, method=:anderson, m=0)
 
-    Δt = 0.1
+    Δt = 0.025
     θ = 1.0
     ode_solver = ThetaMethod(nls,Δt,θ)
     t₀ = 0.0
     T = 1.0
 
-    u_ed₀ = 0.5; u_el₀ = 1.0
+    u_ed₀ = interpolate_everywhere(0.5,U_ed(t₀))
+    u_el₀ = interpolate_everywhere(1.0,U_el(t₀))
     u₀ = interpolate_everywhere([u_ed₀,u_el₀],X(t₀))
 
     uₕₜ = solve(ode_solver,op,u₀,t₀,T)
@@ -202,8 +193,18 @@ module Battery1OnlyConcentration
     l2(u,dΩ) = ∑( ∫( u*u )dΩ )
     h1(u,dΩ) = ∑( ∫( ∇(u)⋅∇(u) )dΩ )
 
+    # using Gridap.ODEs.ODETools
+    # cache = nothing
+    # uᵢ = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
+    # uᵢ, tᵢ, cache = solve_step!(uᵢ,ode_solver,op,u₀,t₀)
+
     ul2 = 0.0; uh1 = 0.0
+    writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
+    writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>u₀[2]])
     for (i,((_u_ed,_u_el),t)) in enumerate(uₕₜ)
+      writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+      writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
+      @info "Time step $i"
       ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
       uh1 = uh1 + k_ed(t)*h1(_u_ed,dΩ_ed) + k_el(t)*h1(_u_el,dΩ_el)
     end
@@ -211,9 +212,9 @@ module Battery1OnlyConcentration
     uh1 = √(Δt*uh1) # (!) Not scaled by diffusion
     @show ul2
     @show uh1
-
-  end
   
+  end
+
   run()
 
 end # module

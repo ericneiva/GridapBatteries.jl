@@ -7,51 +7,21 @@ module Battery2OnlyConcentration
 
   # Embedded geometry
 
-  R = 0.38
-
-  p1 = Point(-0.5,-0.5)
-  p2 = Point( 0.5,-0.5)
-  p3 = Point(-0.5, 0.5)
-  p4 = Point( 0.5, 0.5)
-
-  sph1 = disk(R,x0=p1)
-  sph2 = disk(R,x0=p2)
-  sph3 = disk(R,x0=p3)
-  sph4 = disk(R,x0=p4)
-
-  rx = Point(0.24,0.0)
-  v1  = VectorValue(1.0,0.0)
-  v2  = VectorValue(-1.0,0.0)
-
-  pl1 = plane(x0=p1+rx,v=v1)
-  pl2 = plane(x0=p2+rx,v=v1)
-  pl3 = plane(x0=p1-rx,v=v2)
-  pl4 = plane(x0=p2-rx,v=v2)
-
-  ry = Point(0.0,0.24)
-  v3  = VectorValue(0.0,1.0)
-  v4  = VectorValue(0.0,-1.0)
+  eps = 1.0e-4
+  r_ed = 0.30+eps
+  r_el = 0.45+eps
+  p = Point(0.5,0.5)
   
-  pl5 = plane(x0=p1+ry,v=v3)
-  pl6 = plane(x0=p3+ry,v=v3)
-  pl7 = plane(x0=p1-ry,v=v4)
-  pl8 = plane(x0=p3-ry,v=v4)
+  sph_ed = disk(r_ed,x0=p)
+  sph_el = disk(r_el,x0=p)
 
-  _sphs = union(union(union(sph1,sph2),sph3),sph4)
-  _cyls = union(union(union(intersect(pl1,pl3),intersect(pl2,pl4)),intersect(pl5,pl7)),intersect(pl6,pl8))
-
-  # Warning: Touching can have unexpected consequences and likely break the code
-  electrode   = _sphs
-  binder      = setdiff(_cyls,electrode)
-  electrolyte = ! union(electrode,_cyls)
-
-  # electrode = union(_sphs,_cyls)
-  # electrolyte = ! electrode
+  electrode   = sph_ed
+  electrolyte = ! sph_ed # setdiff(sph_el,sph_ed)
 
   # Background model
 
-  n = 40
-  domain = (-1.0,1.0,-1.0,1.0)
+  n = 20
+  domain = (0.0,1.0,0.0,1.0)
   partition = (n,n)
 
   bgmodel = CartesianDiscreteModel(domain,partition)
@@ -71,6 +41,9 @@ module Battery2OnlyConcentration
 
   Γ_ed_el = EmbeddedBoundary(cutgeo,electrode,electrolyte)
   n_Γ_ed_el = get_normal_vector(Γ_ed_el) # Exterior to electrode
+
+  # writevtk(Ω_P_ed,"omega_ed")
+  # writevtk(Ω_P_el,"omega_el")
 
   # Lebesgue measures
 
@@ -97,11 +70,13 @@ module Battery2OnlyConcentration
   Vstd_ed = TestFESpace(Ω_A_ed,reffe)
   V_ed    = AgFEMSpace(Vstd_ed,aggregate(strategy,cutgeo,electrode))
 
-  Vstd_el = TestFESpace(Ω_A_el,reffe)
+  Vstd_el = TestFESpace(Ω_A_el,reffe,dirichlet_tags="boundary")
   V_el    = AgFEMSpace(Vstd_el,aggregate(strategy,cutgeo,electrolyte))
  
   U_ed = TransientTrialFESpace(V_ed)
-  U_el = TransientTrialFESpace(V_el)
+  u_ext(x,t::Real) = 1.0
+  u_ext(t) = x -> u_ext(x,t)
+  U_el = TransientTrialFESpace(V_el,u_ext)
 
   Y = MultiFieldFESpace([V_ed,V_el])
   X = TransientMultiFieldFESpace([U_ed,U_el])  
@@ -127,9 +102,7 @@ module Battery2OnlyConcentration
                    α[3] * exp(-(x-β[3])^2/γ[3]) +
                    α[4] * exp(-(x-β[4])^2/γ[4]) + 
                    α[5] * exp(-(x-β[5])^2/γ[5])
-  k_ed = x -> exp10(log_10_k_ed(x))/(25e-12) 
-  # Q1) 25e-12 Because vals around 10^(-12)?
-  # Q2) cm^2 to m^2?
+  k_ed = x -> exp10(log_10_k_ed(x))/(25e-16) # 25e-12 = (5e-6)^2
 
   dk_ed = x -> k_ed(x) * log(10) * ( α[1] +
     2 * ( α[2]*exp(-(x-β[2])^2/γ[2])*(β[2]-x)/γ[2] + 
@@ -143,15 +116,11 @@ module Battery2OnlyConcentration
   p = (1.01e3,1.01,-1.56e3,-4.87e2)
   T = 300
   #### Relation
-  k_el = x -> (p[1]*exp(p[2]*x)*exp(p[3]/T)*exp(p[4]*x/T)*1.0e-10)/(25e-12)
-  # Q1) Why 25e-12?
-  # Q2) cm^2 to m^2?
-  
+  k_el = x -> (p[1]*exp(p[2]*x)*exp(p[3]/T)*exp(p[4]*x/T)*1.0e-10)/(25e-12) # 25e-12 = (5e-6)^2
+
   dk_el = x -> k_el(x) * ( p[2] + p[4]/T )
 
   ## Source and transmission terms
-
-  ### Rmk. Homogeneous Neumann BCs
 
   f(k,x,t::Real) = 0.0
   f(k,t::Real) = x -> f(k,x,t)
@@ -203,10 +172,10 @@ module Battery2OnlyConcentration
   op = TransientFEOperator(RES,JAC,JAC_t,X,Y)
 
   using LineSearches: BackTracking
-  nls = NLSolver(show_trace=true, method=:newton, linesearch=BackTracking(), ftol = 1e-6, iterations=30)
+  nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-6, iterations=10)
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
-  Δt = 0.00025
+  Δt = 0.0001
   θ = 1.0
   ode_solver = ThetaMethod(nls,Δt,θ)
 
@@ -216,7 +185,7 @@ module Battery2OnlyConcentration
 
   u₀ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  T = 0.0025
+  T = 0.0005
 
   uₕₜ = solve(ode_solver,op,u₀,t₀,T)
 
@@ -232,9 +201,13 @@ module Battery2OnlyConcentration
 
   @time createpvd("TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
-    pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
+    # pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
+    # writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
+    # writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>u₀[2]])
     for (i,((_u_ed,_u_el),t)) in enumerate(uₕₜ)
-      pvd[t] = createvtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+      # pvd[t] = createvtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+      # writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+      # writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
       ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
       uh1 = uh1 + h1(_u_ed,k_ed,dΩ_ed) + h1(_u_el,k_el,dΩ_el)
     end

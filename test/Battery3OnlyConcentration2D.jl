@@ -1,9 +1,17 @@
-module Battery2OnlyConcentration
+using Gridap
+using Gridap.ReferenceFEs
+using GridapEmbedded
+using GridapPETSc
+using GridapPETSc: PETSC
+using Gridap.ODEs.ODETools
+using Gridap.ODEs.ODETools: Nonlinear, Constant
+using Gridap.ODEs.TransientFETools: TransientFEOperatorFromWeakForm
+using SparseMatricesCSR
+using Test
 
-  using Gridap
-  using Gridap.ReferenceFEs
-  using GridapEmbedded
-  using Test
+using LineSearches: BackTracking
+
+function main(n)
 
   # Embedded geometry
 
@@ -11,7 +19,7 @@ module Battery2OnlyConcentration
   r_ed = 0.30+eps
   r_el = 0.45+eps
   p = Point(0.5,0.5)
-  
+
   sph_ed = disk(r_ed,x0=p)
   sph_el = disk(r_el,x0=p)
 
@@ -20,7 +28,6 @@ module Battery2OnlyConcentration
 
   # Background model
 
-  n = 20
   domain = (0.0,1.0,0.0,1.0)
   partition = (n,n)
 
@@ -28,7 +35,7 @@ module Battery2OnlyConcentration
   h = (domain[2]-domain[1])/n
 
   Ω_bg = Triangulation(bgmodel)
-  
+
   # Active and physical triangulations
 
   cutgeo = cut(bgmodel,electrolyte)
@@ -72,7 +79,7 @@ module Battery2OnlyConcentration
 
   Vstd_el = TestFESpace(Ω_A_el,reffe,dirichlet_tags="boundary")
   V_el    = AgFEMSpace(Vstd_el,aggregate(strategy,cutgeo,electrolyte))
- 
+
   U_ed = TransientTrialFESpace(V_ed)
   u_ext(x,t::Real) = 1.0
   u_ext(t) = x -> u_ext(x,t)
@@ -84,7 +91,7 @@ module Battery2OnlyConcentration
   # Weak form
 
   ### Rmk. Material params. can be spatially-dependent, if needed.
- 
+
   ## Conductivities
 
   ### Electrode
@@ -98,11 +105,11 @@ module Battery2OnlyConcentration
   γ = (0.0,2.534e-3,3.926e-3,9.924e-2,1.0)
   #### Relation
   log_10_k_ed(x) = α[1] * x + β[1] +
-                   α[2] * exp(-(x-β[2])^2/γ[2]) +
-                   α[3] * exp(-(x-β[3])^2/γ[3]) +
-                   α[4] * exp(-(x-β[4])^2/γ[4]) + 
-                   α[5] * exp(-(x-β[5])^2/γ[5])
-  k_ed = x -> exp10(log_10_k_ed(x))/(25e-16) # 25e-12 = (5e-6)^2
+                    α[2] * exp(-(x-β[2])^2/γ[2]) +
+                    α[3] * exp(-(x-β[3])^2/γ[3]) +
+                    α[4] * exp(-(x-β[4])^2/γ[4]) + 
+                    α[5] * exp(-(x-β[5])^2/γ[5])
+  k_ed = x -> exp10(log_10_k_ed(x))/(25e-12) # 25e-12 = (5e-6)^2
 
   dk_ed = x -> k_ed(x) * log(10) * ( α[1] +
     2 * ( α[2]*exp(-(x-β[2])^2/γ[2])*(β[2]-x)/γ[2] + 
@@ -137,12 +144,13 @@ module Battery2OnlyConcentration
 
   m(u,v,dΩ) = ∫( ∂t(u)*v )dΩ
 
-  a(t,u,v,k,dΩ) = ∫( (k∘u)*(∇(u)⋅∇(v)) )dΩ
+  a(u,v,k,dΩ) = ∫( (k∘u)*(∇(u)⋅∇(v)) )dΩ
 
   da(t,u,du,v,k,dk,dΩ) = 
     ∫( (dk∘u)*du*(∇(u)⋅∇(v)) )dΩ + ∫( (k∘u)*(∇(du)⋅∇(v)) )dΩ
 
   l(t,v,k,dΩ) = ∫( v*f(k,t) )dΩ
+  l₀(v,k,dΩ) = ∫( v*f(k,0.0) )dΩ
 
   c(t,u⁺,u⁻,v⁺,v⁻,dΓ) = ∫( g_Γ∘(u⁺,u⁻)*j(v⁺,v⁻) )dΓ
 
@@ -152,7 +160,7 @@ module Battery2OnlyConcentration
   # du1, du2 = get_trial_fe_basis(X(0.0))
   # v1, v2 = get_fe_basis(Y)
 
-  res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(t,u,v,k,dΩ) - l(t,v,k,dΩ)
+  res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(u,v,k,dΩ) - l₀(v,k,dΩ)
 
   jac_t(dut,v,dΩ) = ∫( dut*v )dΩ
 
@@ -168,53 +176,97 @@ module Battery2OnlyConcentration
     jac_t(du_ed,v_ed,dΩ_ed) + jac_t(du_el,v_el,dΩ_el)
 
   # Transient FE Operator and solver
+  assem = SparseMatrixAssembler(SparseMatrixCSR{0,PetscScalar,PetscInt},
+                                Vector{PetscScalar},
+                                evaluate(X,nothing),Y)
+  op = TransientFEOperatorFromWeakForm{Nonlinear}(RES,(JAC,JAC_t),assem,(X,∂t(X)),Y,1)
+  nls = PETScNonlinearSolver()
 
-  op = TransientFEOperator(RES,JAC,JAC_t,X,Y)
-
-  using LineSearches: BackTracking
-  nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-6, iterations=10)
+  # op = TransientFEOperator(RES,JAC,JAC_t,X,Y)
+  # nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-8, iterations=10, linesearch=BackTracking())
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
-  Δt = 0.0001
-  θ = 1.0
+  Δt = 0.0001*(20/n)
+  θ = 0.5
   ode_solver = ThetaMethod(nls,Δt,θ)
 
   ## Initial conditions
   u_ed = 0.5
   u_el = 1.0
 
-  u₀ = interpolate_everywhere([u_ed,u_el],X(0.0))
+  uᵢ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  T = 0.0005
-
-  uₕₜ = solve(ode_solver,op,u₀,t₀,T)
+  T = 0.0002
 
   # Solution, errors and postprocessing
 
   l2(u,dΩ) = ∑( ∫( u*u )dΩ )
   h1(u,k,dΩ) = ∑( ∫( (k∘u)*(∇(u)⋅∇(u)) )dΩ )
 
-  # using Gridap.ODEs.ODETools
-  # cache = nothing
-  # uᵢ = interpolate_everywhere([u(0.0),u(0.0)],X(0.0))
-  # uᵢ, tᵢ, cache = solve_step!(uᵢ,ode_solver,op,u₀,t₀)
-
   @time createpvd("TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
-    # pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
-    # writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>u₀[1]])
-    # writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>u₀[2]])
-    for (i,((_u_ed,_u_el),t)) in enumerate(uₕₜ)
-      # pvd[t] = createvtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-      # writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-      # writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
-      ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
-      uh1 = uh1 + h1(_u_ed,k_ed,dΩ_ed) + h1(_u_el,k_el,dΩ_el)
+    # pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
+    # writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
+    # writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>uᵢ[2]])
+    for ti in t₀:Δt:(T-Δt)
+      @show ti,ti+Δt
+      uₕₜ = solve(ode_solver,op,uᵢ,ti,ti+Δt)
+      for (i,(_u,t)) in enumerate(uₕₜ)
+        _u_ed,_u_el = _u
+        # pvd[t] = createvtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+        # writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+        # writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
+        ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
+        uh1 = uh1 + h1(_u_ed,k_ed,dΩ_ed) + h1(_u_el,k_el,dΩ_el)
+        uᵢ = _u
+      end
     end
     ul2 = √(Δt*ul2)
     uh1 = √(Δt*uh1) # (!) Not scaled by diffusion
     @show ul2
     @show uh1
   end
-  
-end # module
+
+end
+
+options = "-snes_type newtonls 
+           -snes_linesearch_type basic 
+           -snes_linesearch_damping 1.0 
+           -snes_linesearch_monitor 
+           -snes_rtol 1.0e-08 
+           -snes_atol 0.0 
+           -pc_type jacobi 
+           -ksp_type gmres 
+           -snes_monitor 
+           -snes_converged_reason 
+           -ksp_converged_reason 
+           -ksp_error_if_not_converged true"
+
+# options = "-snes_type newtonls 
+#            -snes_linesearch_type basic 
+#            -snes_linesearch_damping 1.0 
+#            -snes_rtol 1.0e-08 
+#            -snes_atol 0.0 
+#            -pc_type jacobi 
+#            -ksp_type gmres  
+#            -ksp_error_if_not_converged true"
+
+GridapPETSc.with(args=split(options)) do
+  # main(20)
+  # main(40)
+  # main(80)
+  # main(160)
+  main(320)
+end
+
+# ul2 = 0.012565965674165453
+# uh1 = 5.851851009264461e-6
+
+# ul2 = 0.01255509490300681
+# uh1 = 1.4322469202398183e-5
+
+# ul2 = 0.012552429913944986
+# uh1 = 3.9842747953960996e-5
+
+# ul2 = 0.012551804280162131
+# uh1 = 0.00011838436602359919

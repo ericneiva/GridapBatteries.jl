@@ -6,7 +6,9 @@ version = "0.1.0"
 [deps]
 Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
 GridapEmbedded = "8838a6a3-0006-4405-b874-385995508d5d"
+GridapPETSc = "bcdc36c2-0c3e-11ea-095a-c9dadae499f1"
 LineSearches = "d3d80556-e9d4-5f37-9878-2ab0fcc64255"
+SparseMatricesCSR = "a0a7dd2c-ebf4-11e9-1f05-cf50bc540ca1"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

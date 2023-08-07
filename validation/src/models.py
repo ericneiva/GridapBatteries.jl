@@ -4,8 +4,12 @@
 import pybamm
 
 
+def smooth_max(x, s=1e-4):
+    return (x + (x**x + s) ** (1 / 2)) / 2
+
+
 class DiffusionOnly(pybamm.models.base_model.BaseModel):
-    def __init__(self, name="diffusion only"):
+    def __init__(self, name="diffusion only", coord_sys="cartesian"):
         super().__init__(name=name)
 
         ######################
@@ -17,11 +21,11 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
         c_e = pybamm.Variable(
             "Electrolyte concentration [mol.m-3]", domains={"primary": "electrolyte"}
         )
-        self.x_s = pybamm.SpatialVariable(
-            "x_s", domain="electrode", coord_sys="cartesian"
+        self.r_s = pybamm.SpatialVariable(
+            "r_s", domain="electrode", coord_sys=coord_sys,
         )
-        self.x_e = pybamm.SpatialVariable(
-            "x_e", domain="electrolyte", coord_sys="cartesian"
+        self.r_e = pybamm.SpatialVariable(
+            "r_e", domain="electrolyte", coord_sys=coord_sys,
         )
 
         ######################
@@ -59,24 +63,35 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
         c_s_surf = pybamm.BoundaryValue(c_s, "right")
         c_e_surf = pybamm.BoundaryValue(c_e, "left")
         rbc_s = (
-            -k
-            * ((c_e_surf / c_e0) * (c_s_surf / c_s_max) * (1 - c_s_surf / c_s_max))
+            k
+            * (
+                smooth_max(c_e_surf / c_e0)
+                * smooth_max(c_s_surf / c_s_max)
+                * smooth_max(1 - c_s_surf / c_s_max)
+            )
             ** (1 / 2)
-            / D_s(c_s_surf)
+            / D_s(smooth_max(c_s_surf))
         )
-        lbc_e = -(
+        lbc_e = (
             (1 - t_plus)
             * k
-            * ((c_e_surf / c_e0) * (c_s_surf / c_s_max) * (1 - c_s_surf / c_s_max))
+            * (
+                smooth_max(c_e_surf / c_e0)
+                * smooth_max(c_s_surf / c_s_max)
+                * smooth_max(1 - c_s_surf / c_s_max)
+            )
             ** (1 / 2)
-            / D_e(c_e_surf)
+            / D_e(smooth_max(c_e_surf))
         )
         self.boundary_conditions = {
             c_s: {"left": (pybamm.Scalar(0), "Neumann"), "right": (rbc_s, "Neumann")},
-            c_e: {"left": (lbc_e, "Neumann"), "right": (pybamm.Scalar(0), "Neumann")},
+            c_e: {"left": (lbc_e, "Neumann"), "right": (pybamm.Scalar(1), "Dirichlet")},
         }
 
         self.initial_conditions = {c_s: c_s0, c_e: c_e0}
+
+        c_s_surf = pybamm.BoundaryValue(c_s, "right")
+        c_e_surf = pybamm.BoundaryValue(c_e, "left")
 
         ######################
         # (Some) variables
@@ -84,12 +99,15 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
         self.variables = {
             "Electrode concentration [mol.m-3]": c_s,
             "Electrolyte concentration [mol.m-3]": c_e,
+            "Concentration [mol.m-3]": pybamm.concatenation(c_s, c_e),
+            "Surface electrode concentration [mol.m-3]": c_s_surf,
+            "Surface electrolyte concentration [mol.m-3]": c_e_surf,
             "Time [s]": pybamm.t,
             "Time [min]": pybamm.t / 60,
-            "x_s [m]": self.x_s,
-            "x_s [um]": self.x_s * 1e6,
-            "x_e [m]": self.x_e,
-            "x_e [um]": self.x_e * 1e6,
+            "r_s [m]": self.r_s,
+            "r_s [um]": self.r_s * 1e6,
+            "r_e [m]": self.r_e,
+            "r_e [um]": self.r_e * 1e6,
         }
 
     @property
@@ -98,8 +116,8 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
         L_e = pybamm.Parameter("Electrolyte thickness [m]")
         return pybamm.Geometry(
             {
-                "electrode": {self.x_s: {"min": pybamm.Scalar(0), "max": L_s}},
-                "electrolyte": {self.x_e: {"min": L_s, "max": L_s + L_e}},
+                "electrode": {self.r_s: {"min": pybamm.Scalar(0), "max": L_s}},
+                "electrolyte": {self.r_e: {"min": L_s, "max": L_s + L_e}},
             }
         )
 
@@ -112,7 +130,7 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
 
     @property
     def default_var_pts(self):
-        return {self.x_s: 50, self.x_e: 50}
+        return {self.r_s: 50, self.r_e: 50}
 
     @property
     def default_spatial_methods(self):
@@ -124,4 +142,4 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
     @property
     def default_solver(self):
         # return pybamm.IDAKLUSolver()
-        return pybamm.CasadiSolver("fast")
+        return pybamm.CasadiSolver("safe")

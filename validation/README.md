@@ -26,3 +26,7 @@ deactivate
 ```bash
 pip install pybamm
 ```
+Note that, currently, we need to install PyBaMM from a specific branch to get some necessary features not yet available in the develop branch, so we need to call
+```bash
+pip install git+https://github.com/pybamm-team/PyBaMM@issue-3115-shell-domains
+```

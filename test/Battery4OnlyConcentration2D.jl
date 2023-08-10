@@ -15,20 +15,13 @@ function main(n)
 
   # Embedded geometry
 
-  eps = 1.0e-4
-  r_ed = 0.30+eps
-  r_el = 0.45+eps
-  p = Point(0.5,0.5)
-
-  sph_ed = disk(r_ed,x0=p)
-  sph_el = disk(r_el,x0=p)
-
-  electrode   = sph_ed
-  electrolyte = ! sph_ed # setdiff(sph_el,sph_ed)
+  p = Point(0.3,0.2)
+  electrode = plane(x0=p,v=VectorValue(1.0,0.0))
+  electrolyte = ! electrode # setdiff(sph_el,sph_ed)
 
   # Background model
 
-  domain = (0.0,1.0,0.0,1.0)
+  domain = (0.0,0.45,0.0,0.45)
   partition = (n,n)
 
   bgmodel = CartesianDiscreteModel(domain,partition)
@@ -77,7 +70,7 @@ function main(n)
   Vstd_ed = TestFESpace(Ω_A_ed,reffe)
   V_ed    = AgFEMSpace(Vstd_ed,aggregate(strategy,cutgeo,electrode))
 
-  Vstd_el = TestFESpace(Ω_A_el,reffe,dirichlet_tags="boundary")
+  Vstd_el = TestFESpace(Ω_A_el,reffe,dirichlet_tags=[2,4,8])
   V_el    = AgFEMSpace(Vstd_el,aggregate(strategy,cutgeo,electrolyte))
 
   U_ed = TransientTrialFESpace(V_ed)
@@ -187,7 +180,7 @@ function main(n)
   # nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-8, iterations=10, linesearch=BackTracking())
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
-  Δt = 0.0001*(20/n)
+  Δt = 0.001/(4^(log2(n/20)))
   θ = 0.5
   ode_solver = ThetaMethod(nls,Δt,θ)
 
@@ -197,7 +190,7 @@ function main(n)
 
   uᵢ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  T = 0.0002
+  tₑ = 0.01
 
   # Solution, errors and postprocessing
 
@@ -206,15 +199,17 @@ function main(n)
 
   @time createpvd("TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
-    pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
+    pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0")
     writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
     writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>uᵢ[2]])
-    for ti in t₀:Δt:(T-Δt)
+    i = 0
+    for ti in t₀:Δt:(tₑ-Δt)
       @show ti,ti+Δt
+      i = i+1
       uₕₜ = solve(ode_solver,op,uᵢ,ti,ti+Δt)
-      for (i,(_u,t)) in enumerate(uₕₜ)
+      for (_u,t) in uₕₜ
         _u_ed,_u_el = _u
-        pvd[t] = createvtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+        pvd[t] = createvtk(Ω_P_ed,"res_ed_$i")
         writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
         writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
         ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
@@ -223,55 +218,72 @@ function main(n)
       end
     end
     ul2 = √(Δt*ul2)
-    uh1 = √(Δt*uh1) # (!) Not scaled by diffusion
+    uh1 = √(Δt*uh1)
     @show ul2
     @show uh1
   end
 
 end
 
-options = "-snes_type newtonls 
-           -snes_linesearch_type basic 
-           -snes_linesearch_damping 1.0 
+options = "-snes_type newtonls
+           -snes_linesearch_type bt 
+           -snes_linesearch_damping 0.8
            -snes_linesearch_monitor 
            -snes_rtol 1.0e-08 
            -snes_atol 0.0 
-           -pc_type jacobi 
-           -ksp_type gmres 
-           -snes_monitor 
+           -pc_type cholesky
+           -pc_factor_mat_solver_type mumps
+           -ksp_type none
+           -ksp_monitor
            -snes_converged_reason 
            -ksp_converged_reason 
            -ksp_error_if_not_converged true"
 
-# options = "-snes_type newtonls 
-#            -snes_linesearch_type basic 
-#            -snes_linesearch_damping 1.0 
+# options = "-snes_type newtonls
+#            -snes_linesearch_type bt 
+#            -snes_linesearch_damping 0.8
+#            -snes_linesearch_monitor 
 #            -snes_rtol 1.0e-08 
 #            -snes_atol 0.0 
-#            -pc_type jacobi 
-#            -ksp_type gmres  
+#            -pc_type cholesky
+#            -pc_factor_mat_solver_type mumps
+#            -ksp_type none
+#            -ksp_monitor
+#            -snes_converged_reason 
+#            -ksp_converged_reason 
 #            -ksp_error_if_not_converged true"
 
 GridapPETSc.with(args=split(options)) do
   main(20)
   main(40)
-  main(80)
+  # main(80)
   # main(160)
   # main(320)
   # main(640)
 end
 
-# ul2 = 0.012565965674165453
-# uh1 = 5.851851009264461e-6
+# ul2 = 0.004499274324688881
+# uh1 = 0.0002470357418340545
 
-# ul2 = 0.01255509490300681
-# uh1 = 1.4322469202398183e-5
+# ul2 = 0.004499394879430065
+# uh1 = 0.00023101171000226763
 
-# ul2 = 0.012552429913944986
-# uh1 = 3.9842747953960996e-5
+# ul2 = 0.004499464598786009
+# uh1 = 0.0002211672304197376
 
-# ul2 = 0.012551804280162131
-# uh1 = 0.00011838436602359919
+# ul2 = 0.004499504248244329
+# uh1 = 0.0002305132720755624
 
-# ul2 = 0.012551707151483682
-# uh1 = NaN
+###############
+
+# ul2 = 0.004499274324688881
+# uh1 = 0.0002470357418340545
+
+# ul2 = 0.004499452729195149
+# uh1 = 0.0002138012026235924
+
+# ul2 = 0.004499507248071766
+# uh1 = 0.0002079995247887595
+
+# ul2 = 0.004499528433702517
+# uh1 = 0.0002217589900201261

@@ -2,10 +2,17 @@
 # Contact lens curing temperature dependent model
 #
 import pybamm
+import numpy as np
 
+def smooth_heaviside(x, s):
+    transition = 1 / (1 + np.exp( (1 / x + 1 / (x - s)) * s))
+    # return transition
+    return (x > 0) * (x < s) * transition + (x > s) * 1
 
 def smooth_max(x, s=1e-4):
-    return (x + (x**x + s) ** (1 / 2)) / 2
+    return smooth_heaviside(x, 1e-4) * x
+    # return pybamm.maximum(x, 0)
+    # return (x + (x**x + s) ** (1 / 2)) / 2
 
 
 class DiffusionOnly(pybamm.models.base_model.BaseModel):
@@ -142,4 +149,4 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
     @property
     def default_solver(self):
         # return pybamm.IDAKLUSolver()
-        return pybamm.CasadiSolver("safe")
+        return pybamm.CasadiSolver("fast", rtol=1e-6, atol=1e-6)

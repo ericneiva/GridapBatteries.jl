@@ -8,4 +8,4 @@ Manifest.toml
 tmp/
 .vscode/
 validation/env
-validation/__pycache__
+validation/src/__pycache__

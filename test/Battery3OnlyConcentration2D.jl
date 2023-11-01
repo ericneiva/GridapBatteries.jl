@@ -162,12 +162,16 @@ function main(n)
   # v1, v2 = get_fe_basis(Y)
 
   res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(u,v,k,dΩ) - l₀(v,k,dΩ)
-
+  rhs(t,u,v,k,dΩ) = l₀(v,k,dΩ) - a(u,v,k,dΩ)
   jac_t(dut,v,dΩ) = ∫( dut*v )dΩ
 
   RES(t,(u_ed,u_el),(v_ed,v_el)) = 
     res(t,u_ed,v_ed,k_ed,dΩ_ed) + 
     res(t,u_el,v_el,k_el,dΩ_el) -
+      c(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el)
+  RHS(t,(u_ed,u_el),(v_ed,v_el)) = 
+    rhs(t,u_ed,v_ed,k_ed,dΩ_ed) + 
+    rhs(t,u_el,v_el,k_el,dΩ_el) +
       c(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el)
   JAC(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     da(t,u_ed,du_ed,v_ed,k_ed,dk_ed,dΩ_ed) +
@@ -180,14 +184,14 @@ function main(n)
   assem = SparseMatrixAssembler(SparseMatrixCSR{0,PetscScalar,PetscInt},
                                 Vector{PetscScalar},
                                 evaluate(X,nothing),Y)
-  op = TransientFEOperatorFromWeakForm{Nonlinear}(RES,(JAC,JAC_t),assem,(X,∂t(X)),Y,1)
+  op = TransientFEOperatorFromWeakForm{Nonlinear}(RES,RHS,(JAC,JAC_t),assem,(X,∂t(X)),Y,1)
   nls = PETScNonlinearSolver()
 
   # op = TransientFEOperator(RES,JAC,JAC_t,X,Y)
   # nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-8, iterations=10, linesearch=BackTracking())
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
-  Δt = 0.0001*(20/n)
+  Δt = 0.0001*(20/n) # 0.04/(4^(log2(n/20)))
   θ = 0.5
   ode_solver = ThetaMethod(nls,Δt,θ)
 
@@ -197,7 +201,7 @@ function main(n)
 
   uᵢ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  T = 0.0002
+  tₑ = 0.0002 # 1.0
 
   # Solution, errors and postprocessing
 
@@ -206,51 +210,46 @@ function main(n)
 
   @time createpvd("TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
-    pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
-    writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
-    writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>uᵢ[2]])
-    for ti in t₀:Δt:(T-Δt)
+    pvd[t₀] = createvtk(Ω_P_ed,"results/res_ed_0")
+    writevtk(Ω_P_ed,"results/res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
+    writevtk(Ω_P_el,"results/res_el_0",cellfields=["uₕₜ"=>uᵢ[2]])
+    i = 0
+    for ti in t₀:Δt:(tₑ-Δt)
       @show ti,ti+Δt
+      i = i+1
       uₕₜ = solve(ode_solver,op,uᵢ,ti,ti+Δt)
-      for (i,(_u,t)) in enumerate(uₕₜ)
+      for (_u,t) in uₕₜ
         _u_ed,_u_el = _u
-        pvd[t] = createvtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-        writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-        writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
+        pvd[t] = createvtk(Ω_P_ed,"results/res_ed_$i")
+        writevtk(Ω_P_ed,"results/res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+        writevtk(Ω_P_el,"results/res_el_$i",cellfields=["uₕₜ"=>_u_el])
         ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
         uh1 = uh1 + h1(_u_ed,k_ed,dΩ_ed) + h1(_u_el,k_el,dΩ_el)
         uᵢ = _u
       end
     end
     ul2 = √(Δt*ul2)
-    uh1 = √(Δt*uh1) # (!) Not scaled by diffusion
+    uh1 = √(Δt*uh1)
     @show ul2
     @show uh1
   end
 
 end
 
-options = "-snes_type newtonls 
-           -snes_linesearch_type basic 
-           -snes_linesearch_damping 1.0 
-           -snes_linesearch_monitor 
-           -snes_rtol 1.0e-08 
-           -snes_atol 0.0 
-           -pc_type jacobi 
-           -ksp_type gmres 
-           -snes_monitor 
+options = "-snes_type nrichardson
+           -snes_linesearch_type basic
+           -snes_linesearch_damping 1.0
+           -npc_snes_type newtonls
+           -npc_snes_rtol 1.0e-08
+           -npc_snes_atol 0.0
+           -snes_rtol 1.0e-08
+           -snes_atol 0.0
+           -pc_type jacobi
+           -ksp_type gmres
+           -ksp_monitor
            -snes_converged_reason 
            -ksp_converged_reason 
            -ksp_error_if_not_converged true"
-
-# options = "-snes_type newtonls 
-#            -snes_linesearch_type basic 
-#            -snes_linesearch_damping 1.0 
-#            -snes_rtol 1.0e-08 
-#            -snes_atol 0.0 
-#            -pc_type jacobi 
-#            -ksp_type gmres  
-#            -ksp_error_if_not_converged true"
 
 GridapPETSc.with(args=split(options)) do
   main(20)
@@ -260,18 +259,3 @@ GridapPETSc.with(args=split(options)) do
   # main(320)
   # main(640)
 end
-
-# ul2 = 0.012565965674165453
-# uh1 = 5.851851009264461e-6
-
-# ul2 = 0.01255509490300681
-# uh1 = 1.4322469202398183e-5
-
-# ul2 = 0.012552429913944986
-# uh1 = 3.9842747953960996e-5
-
-# ul2 = 0.012551804280162131
-# uh1 = 0.00011838436602359919
-
-# ul2 = 0.012551707151483682
-# uh1 = NaN

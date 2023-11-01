@@ -180,7 +180,7 @@ function main(n)
   # nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-8, iterations=10, linesearch=BackTracking())
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
-  Δt = 0.001/(4^(log2(n/20)))
+  Δt = 0.04/(4^(log2(n/20)))
   θ = 0.5
   ode_solver = ThetaMethod(nls,Δt,θ)
 
@@ -190,7 +190,7 @@ function main(n)
 
   uᵢ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  tₑ = 0.01
+  tₑ = 1.0
 
   # Solution, errors and postprocessing
 
@@ -199,9 +199,9 @@ function main(n)
 
   @time createpvd("TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
-    pvd[t₀] = createvtk(Ω_P_ed,"res_ed_0")
-    writevtk(Ω_P_ed,"res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
-    writevtk(Ω_P_el,"res_el_0",cellfields=["uₕₜ"=>uᵢ[2]])
+    pvd[t₀] = createvtk(Ω_P_ed,"results/res_ed_0")
+    writevtk(Ω_P_ed,"results/res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
+    writevtk(Ω_P_el,"results/res_el_0",cellfields=["uₕₜ"=>uᵢ[2]])
     i = 0
     for ti in t₀:Δt:(tₑ-Δt)
       @show ti,ti+Δt
@@ -209,9 +209,9 @@ function main(n)
       uₕₜ = solve(ode_solver,op,uᵢ,ti,ti+Δt)
       for (_u,t) in uₕₜ
         _u_ed,_u_el = _u
-        pvd[t] = createvtk(Ω_P_ed,"res_ed_$i")
-        writevtk(Ω_P_ed,"res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-        writevtk(Ω_P_el,"res_el_$i",cellfields=["uₕₜ"=>_u_el])
+        pvd[t] = createvtk(Ω_P_ed,"results/res_ed_$i")
+        writevtk(Ω_P_ed,"results/res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
+        writevtk(Ω_P_el,"results/res_el_$i",cellfields=["uₕₜ"=>_u_el])
         ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
         uh1 = uh1 + h1(_u_ed,k_ed,dΩ_ed) + h1(_u_el,k_el,dΩ_el)
         uᵢ = _u
@@ -225,20 +225,36 @@ function main(n)
 
 end
 
-options = "-snes_type newtonls
-           -snes_linesearch_type bt 
-           -snes_linesearch_damping 0.8
-           -snes_linesearch_monitor 
-           -snes_rtol 1.0e-08 
-           -snes_atol 0.0 
-           -pc_type cholesky
-           -pc_factor_mat_solver_type mumps
-           -ksp_type none
+options = "-snes_type nrichardson
+           -snes_linesearch_type basic
+           -snes_linesearch_damping 1.0
+           -npc_snes_type newtonls
+           -npc_snes_rtol 1.0e-08
+           -npc_snes_atol 0.0
+           -snes_rtol 1.0e-08
+           -snes_atol 0.0
+           -pc_type jacobi
+           -ksp_type gmres
            -ksp_monitor
            -snes_converged_reason 
            -ksp_converged_reason 
            -ksp_error_if_not_converged true"
 
+# # Inner iterative solver
+# options = "-snes_type newtonls
+#            -snes_linesearch_type bt 
+#            -snes_linesearch_damping 0.8
+#            -snes_linesearch_monitor 
+#            -snes_rtol 1.0e-08 
+#            -snes_atol 0.0 
+#            -pc_type jacobi
+#            -ksp_type gmres
+#            -ksp_monitor
+#            -snes_converged_reason 
+#            -ksp_converged_reason 
+#            -ksp_error_if_not_converged true"
+
+# # Inner direct solver
 # options = "-snes_type newtonls
 #            -snes_linesearch_type bt 
 #            -snes_linesearch_damping 0.8
@@ -254,36 +270,10 @@ options = "-snes_type newtonls
 #            -ksp_error_if_not_converged true"
 
 GridapPETSc.with(args=split(options)) do
-  main(20)
+  # main(20)
   main(40)
   # main(80)
   # main(160)
   # main(320)
   # main(640)
 end
-
-# ul2 = 0.004499274324688881
-# uh1 = 0.0002470357418340545
-
-# ul2 = 0.004499394879430065
-# uh1 = 0.00023101171000226763
-
-# ul2 = 0.004499464598786009
-# uh1 = 0.0002211672304197376
-
-# ul2 = 0.004499504248244329
-# uh1 = 0.0002305132720755624
-
-###############
-
-# ul2 = 0.004499274324688881
-# uh1 = 0.0002470357418340545
-
-# ul2 = 0.004499452729195149
-# uh1 = 0.0002138012026235924
-
-# ul2 = 0.004499507248071766
-# uh1 = 0.0002079995247887595
-
-# ul2 = 0.004499528433702517
-# uh1 = 0.0002217589900201261

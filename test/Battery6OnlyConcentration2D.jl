@@ -296,15 +296,20 @@ function main(n)
     for ti in t₀:Δt:(tₑ-Δt)
       @show ti,ti+Δt
       i = i+1
-      uₕₜ = solve(ode_solver,op,uᵢ,ti,ti+Δt)
-      for (_u,t) in uₕₜ
-        _u_ed,_u_el = _u
+      uₕₜ_el = solve(ode_solver,op_el,u_el,ti,ti+Δt)
+      for (_u_el,t) in uₕₜ_el
+        u_el = _u_el
+        writevtk(Ω_P_el,"results/res_el_$i",cellfields=["uₕₜ"=>u_el])
+        ul2 = ul2 + l2(u_el,dΩ_el)
+        uh1 = uh1 + h1(u_el,k_el,dΩ_el)
+      end
+      uₕₜ_ed = solve(ode_solver,op_ed,u_ed,ti,ti+Δt)
+      for (_u_ed,t) in uₕₜ_ed
+        u_ed = _u_ed
         pvd[t] = createvtk(Ω_P_ed,"results/res_ed_$i")
-        writevtk(Ω_P_ed,"results/res_ed_$i",cellfields=["uₕₜ"=>_u_ed])
-        writevtk(Ω_P_el,"results/res_el_$i",cellfields=["uₕₜ"=>_u_el])
-        ul2 = ul2 + l2(_u_ed,dΩ_ed) + l2(_u_el,dΩ_el)
-        uh1 = uh1 + h1(_u_ed,k_ed,dΩ_ed) + h1(_u_el,k_el,dΩ_el)
-        uᵢ = _u
+        writevtk(Ω_P_ed,"results/res_ed_$i",cellfields=["uₕₜ"=>u_ed])
+        ul2 = ul2 + l2(u_ed,dΩ_ed)
+        uh1 = uh1 + h1(u_ed,k_ed,dΩ_ed)
       end
     end
     ul2 = √(Δt*ul2)

@@ -214,8 +214,6 @@ function main(n)
   ## Initial conditions
   u_ed_0 = 0.5
   u_el_0 = 1.0
-
-  uᵢ = interpolate_everywhere([u_ed_0,u_el_0],X(0.0))
   
   u_ed = interpolate_everywhere(u_ed_0,U_ed)
   u_el = interpolate_everywhere(u_el_0,U_el)
@@ -274,18 +272,23 @@ function main(n)
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
   # Time discretization
-
-  Δt = 0.0005 # *(20/n)
-  θ = 0.5
-  ode_solver = ThetaMethod(nls,Δt,θ)
+  
+  Δtᵒ = 0.1 # *(20/n)
+  Δtⁱ = Δtᵒ/20
+  θ = 1.0
+  ode_solver_ed = ThetaMethod(nls,Δtᵒ,θ)
+  ode_solver_el = ThetaMethod(nls,Δtⁱ,θ)
 
   t₀ = 0.0
-  tₑ = 0.01
+  tₑ = 2.0
 
   # Solution, errors and postprocessing
 
   l2(u,dΩ) = ∑( ∫( u*u )dΩ )
   h1(u,k,dΩ) = ∑( ∫( (k∘u)*(∇(u)⋅∇(u)) )dΩ )
+
+  tol = 1.0e-6
+  @assert Δtⁱ > 10.0*tol
 
   @time createpvd("results/TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
@@ -293,17 +296,25 @@ function main(n)
     writevtk(Ω_P_ed,"results/res_ed_0",cellfields=["uₕₜ"=>u_ed])
     writevtk(Ω_P_el,"results/res_el_0",cellfields=["uₕₜ"=>u_el])
     i = 0
-    for ti in t₀:Δt:(tₑ-Δt)
-      @show ti,ti+Δt
+    tᵒ = t₀
+    while tᵒ < tₑ-tol
+      @show tᵒ,tᵒ+Δtᵒ
       i = i+1
-      uₕₜ_el = solve(ode_solver,op_el,u_el,ti,ti+Δt)
-      for (_u_el,t) in uₕₜ_el
-        u_el = _u_el
-        writevtk(Ω_P_el,"results/res_el_$i",cellfields=["uₕₜ"=>u_el])
-        ul2 = ul2 + l2(u_el,dΩ_el)
-        uh1 = uh1 + h1(u_el,k_el,dΩ_el)
+      tⁱ = tᵒ
+      @show "BEGIN time integrate electrolyte"
+      while tⁱ < tᵒ+Δtᵒ-tol
+        uₕₜ_el = solve(ode_solver_el,op_el,u_el,tⁱ,tⁱ+Δtⁱ)
+        for (_u_el,t) in uₕₜ_el
+          u_el = _u_el
+        end
+        tⁱ = tⁱ+Δtⁱ
       end
-      uₕₜ_ed = solve(ode_solver,op_ed,u_ed,ti,ti+Δt)
+      writevtk(Ω_P_el,"results/res_el_$i",cellfields=["uₕₜ"=>u_el])
+      ul2 = ul2 + l2(u_el,dΩ_el)
+      uh1 = uh1 + h1(u_el,k_el,dΩ_el)
+      @show "END time integrate electrolyte"
+      @show "BEGIN time integrate electrode"
+      uₕₜ_ed = solve(ode_solver_ed,op_ed,u_ed,tᵒ,tᵒ+Δtᵒ)
       for (_u_ed,t) in uₕₜ_ed
         u_ed = _u_ed
         pvd[t] = createvtk(Ω_P_ed,"results/res_ed_$i")
@@ -311,9 +322,11 @@ function main(n)
         ul2 = ul2 + l2(u_ed,dΩ_ed)
         uh1 = uh1 + h1(u_ed,k_ed,dΩ_ed)
       end
+      @show "END time integrate electrode"
+      tᵒ = tᵒ+Δtᵒ
     end
-    ul2 = √(Δt*ul2)
-    uh1 = √(Δt*uh1)
+    ul2 = √(Δtᵒ*ul2)
+    uh1 = √(Δtᵒ*uh1)
     @show ul2
     @show uh1
   end
@@ -337,8 +350,7 @@ options = "-snes_type nrichardson
 
 GridapPETSc.with(args=split(options)) do
   # main(20)
-  main(30)
-  # main(40)
+  main(40)
   # main(80)
   # main(160)
   # main(320)

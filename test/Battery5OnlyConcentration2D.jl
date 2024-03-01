@@ -65,11 +65,20 @@ function main(n)
   # dΩ_ed = Measure(Ω_P_ed,degree)
   # dΩ_el = Measure(Ω_P_el,degree)
 
-  degree = 3*order+1
+  degree = 2*order # Subintegration # 3*order+1
   q_ed = Quadrature(momentfitted,cutgeo,electrode,degree)
   q_el = Quadrature(momentfitted,cutgeo,electrolyte,degree)
+
   dΩ_ed = Measure(Ω_A_ed,q_ed)
   dΩ_el = Measure(Ω_A_el,q_el)
+
+  # Quadratures for lumped mass matrix
+  degree_l = 1
+  q_ed_l = Quadrature(momentfitted,cutgeo,electrode,degree_l)
+  q_el_l = Quadrature(momentfitted,cutgeo,electrolyte,degree_l)
+
+  dΩ_ed_l = Measure(Ω_A_ed,q_ed_l)
+  dΩ_el_l = Measure(Ω_A_el,q_el_l)
 
   dΓ_ed_el = Measure(Γ_ed_el,degree)
   dΓ_out = Measure(Γ_out,degree)
@@ -135,12 +144,12 @@ function main(n)
 
   σ = 1.0e-06
   ## Eq. (32) Bonilla-Badia max{0,f}
-  s(f) = f # (f+√(f*f+σ))/2.0
-  ds(f) = 1 # (1+f/√(f*f+σ))/2.0
+  s(f) = (f+√(f*f+σ))/2.0
+  ds(f) = (1+f/√(f*f+σ))/2.0
 
-  g_Γ = (u⁺,u⁻) -> 0.25 # √(s(u⁻)*s(u⁺)*s(1-u⁺))
-  dg⁺_Γ = (u⁺,u⁻) -> 0.0 # (s(u⁻)*(-s(u⁺)*ds(1-u⁺)+s(1-u⁺)*ds(u⁺)))/(2.0*√(s(u⁻)*s(1-u⁺)s(u⁺)))
-  dg⁻_Γ = (u⁺,u⁻) -> 0.0 # (√(s(u⁻)*s(1-u⁺)*s(u⁺))*ds(u⁻))/(2.0*s(u⁻))
+  g_Γ = (u⁺,u⁻) -> √(s(u⁻)*s(u⁺)*s(1-u⁺))
+  dg⁺_Γ = (u⁺,u⁻) -> (s(u⁻)*(-s(u⁺)*ds(1-u⁺)+s(1-u⁺)*ds(u⁺)))/(2.0*√(s(u⁻)*s(1-u⁺)s(u⁺)))
+  dg⁻_Γ = (u⁺,u⁻) -> (√(s(u⁻)*s(1-u⁺)*s(u⁺))*ds(u⁻))/(2.0*s(u⁻))
 
   j(u⁺,u⁻) = u⁺ - u⁻
 
@@ -172,13 +181,13 @@ function main(n)
   # du1, du2 = get_trial_fe_basis(X(0.0))
   # v1, v2 = get_fe_basis(Y)
 
-  res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(u,v,k,dΩ) - l₀(v,k,dΩ)
+  res(t,u,v,k,dΩ,dΩ_l) = m(u,v,dΩ_l) + a(u,v,k,dΩ) - l₀(v,k,dΩ)
   rhs(t,u,v,k,dΩ) = l₀(v,k,dΩ) - a(u,v,k,dΩ)
   jac_t(dut,v,dΩ) = ∫( dut*v )dΩ
 
   RES(t,(u_ed,u_el),(v_ed,v_el)) = 
-    res(t,u_ed,v_ed,k_ed,dΩ_ed) + 
-    res(t,u_el,v_el,k_el,dΩ_el) -
+    res(t,u_ed,v_ed,k_ed,dΩ_ed,dΩ_ed_l) +
+    res(t,u_el,v_el,k_el,dΩ_el,dΩ_el_l) -
       c(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el) +
       aᵈ(u_el,v_el,k_el,n_Γ_out,dΓ_out) -
       bᵈ(u_out,v_el,k_el,n_Γ_out,dΓ_out)
@@ -194,7 +203,7 @@ function main(n)
     dc(t,u_ed,u_el,du_ed,du_el,v_ed,v_el,dΓ_ed_el) +
     daᵈ(u_el,du_el,v_el,k_el,dk_el,n_Γ_out,dΓ_out) 
   JAC_t(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
-    jac_t(du_ed,v_ed,dΩ_ed) + jac_t(du_el,v_el,dΩ_el)
+    jac_t(du_ed,v_ed,dΩ_ed_l) + jac_t(du_el,v_el,dΩ_el_l) # Lumped
 
   # Transient FE Operator and solver
   assem = SparseMatrixAssembler(SparseMatrixCSR{0,PetscScalar,PetscInt},
@@ -212,12 +221,12 @@ function main(n)
   ode_solver = ThetaMethod(nls,Δt,θ)
 
   ## Initial conditions
-  u_ed(x) = 0.5 + 0.5 * √( x[1]^2 + x[2]^2 ) / 3.0
-  u_el(x) = u_ed(x)
+  u_ed = 0.5
+  u_el = 1.0
 
   uᵢ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  tₑ = 0.001
+  tₑ = 0.016
 
   # Solution, errors and postprocessing
 
@@ -269,8 +278,8 @@ options = "-snes_type nrichardson
 
 GridapPETSc.with(args=split(options)) do
   # main(20)
-  # main(40)
-  main(80)
+  main(40)
+  # main(80)
   main(160)
   # main(320)
   # main(640)

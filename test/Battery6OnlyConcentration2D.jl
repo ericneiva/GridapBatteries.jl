@@ -65,11 +65,20 @@ function main(n)
   # dΩ_ed = Measure(Ω_P_ed,degree)
   # dΩ_el = Measure(Ω_P_el,degree)
 
-  degree = 3*order+1
+  degree = 2*order # Subintegration # 3*order+1
   q_ed = Quadrature(momentfitted,cutgeo,electrode,degree)
   q_el = Quadrature(momentfitted,cutgeo,electrolyte,degree)
+
   dΩ_ed = Measure(Ω_A_ed,q_ed)
   dΩ_el = Measure(Ω_A_el,q_el)
+
+  # Quadratures for lumped mass matrix
+  degree_l = 1
+  q_ed_l = Quadrature(momentfitted,cutgeo,electrode,degree_l)
+  q_el_l = Quadrature(momentfitted,cutgeo,electrolyte,degree_l)
+
+  dΩ_ed_l = Measure(Ω_A_ed,q_ed_l)
+  dΩ_el_l = Measure(Ω_A_el,q_el_l)
 
   dΓ_ed_el = Measure(Γ_ed_el,degree)
   dΓ_out = Measure(Γ_out,degree)
@@ -154,9 +163,13 @@ function main(n)
   l(t,v,k,dΩ) = ∫( v*f(k,t) )dΩ
   l₀(v,k,dΩ) = ∫( v*f(k,0.0) )dΩ
 
-  c(t,u⁺,u⁻,v⁺,v⁻,dΓ) = ∫( g_Γ∘(u⁺,u⁻)*j(v⁺,v⁻) )dΓ
+  c(t,u⁺,u⁻,v⁺,v⁻,dΓ) = ∫( g_Γ∘(u⁺,u⁻) * j(v⁺,v⁻) )dΓ
+  c⁺(t,u⁺,v⁺,u⁻,dΓ) = ∫(          g_Γ∘(u⁺,u⁻) * v⁺   )dΓ
+  c⁻(t,u⁻,v⁻,u⁺,dΓ) = ∫( -1.0 * ( g_Γ∘(u⁺,u⁻) * v⁻ ) )dΓ
 
   dc(t,u⁺,u⁻,du⁺,du⁻,v⁺,v⁻,dΓ) = ∫( (dg⁺_Γ∘(u⁺,u⁻)*du⁺+dg⁻_Γ∘(u⁺,u⁻)*du⁻)*j(v⁺,v⁻) )dΓ
+  dc⁺(t,u⁺,du⁺,v⁺,u⁻,dΓ) = ∫(          dg⁺_Γ∘(u⁺,u⁻)*du⁺ * v⁺   )dΓ
+  dc⁻(t,u⁻,du⁻,v⁻,u⁺,dΓ) = ∫( -1.0 * ( dg⁻_Γ∘(u⁺,u⁻)*du⁻ * v⁻ ) )dΓ
 
   γᵈ = 20.0 # ≈ maximum of k_el
   u_out = 1.0
@@ -172,13 +185,13 @@ function main(n)
   # du1, du2 = get_trial_fe_basis(X(0.0))
   # v1, v2 = get_fe_basis(Y)
 
-  res(t,u,v,k,dΩ) = m(u,v,dΩ) + a(u,v,k,dΩ) - l₀(v,k,dΩ)
+  res(t,u,v,k,dΩ,dΩ_l) = m(u,v,dΩ_l) + a(u,v,k,dΩ) - l₀(v,k,dΩ)
   rhs(t,u,v,k,dΩ) = l₀(v,k,dΩ) - a(u,v,k,dΩ)
   jac_t(dut,v,dΩ) = ∫( dut*v )dΩ
 
   RES(t,(u_ed,u_el),(v_ed,v_el)) = 
-    res(t,u_ed,v_ed,k_ed,dΩ_ed) + 
-    res(t,u_el,v_el,k_el,dΩ_el) -
+    res(t,u_ed,v_ed,k_ed,dΩ_ed,dΩ_ed_l) +
+    res(t,u_el,v_el,k_el,dΩ_el,dΩ_el_l) -
       c(t,u_ed,u_el,v_ed,v_el,dΓ_ed_el) +
       aᵈ(u_el,v_el,k_el,n_Γ_out,dΓ_out) -
       bᵈ(u_out,v_el,k_el,n_Γ_out,dΓ_out)
@@ -194,30 +207,80 @@ function main(n)
     dc(t,u_ed,u_el,du_ed,du_el,v_ed,v_el,dΓ_ed_el) +
     daᵈ(u_el,du_el,v_el,k_el,dk_el,n_Γ_out,dΓ_out) 
   JAC_t(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
-    jac_t(du_ed,v_ed,dΩ_ed) + jac_t(du_el,v_el,dΩ_el)
+    jac_t(du_ed,v_ed,dΩ_ed_l) + jac_t(du_el,v_el,dΩ_el_l) # Lumped
+
+  # Staggered approach
+
+  ## Initial conditions
+  u_ed_0 = 0.5
+  u_el_0 = 1.0
+
+  uᵢ = interpolate_everywhere([u_ed_0,u_el_0],X(0.0))
+  
+  u_ed = interpolate_everywhere(u_ed_0,U_ed)
+  u_el = interpolate_everywhere(u_el_0,U_el)
+
+  ## Weak forms
+
+  RES_ed(t,u_ed,v_ed) = 
+    res(t,u_ed,v_ed,k_ed,dΩ_ed,dΩ_ed_l) -
+      c⁺(t,u_ed,v_ed,u_el,dΓ_ed_el)
+  RHS_ed(t,u_ed,v_ed) = 
+    rhs(t,u_ed,v_ed,k_ed,dΩ_ed) +
+      c⁺(t,u_ed,v_ed,u_el,dΓ_ed_el)
+  JAC_ed(t,u_ed,du_ed,v_ed) = 
+    da(t,u_ed,du_ed,v_ed,k_ed,dk_ed,dΩ_ed) +
+    dc⁺(t,u_ed,du_ed,v_ed,u_el,dΓ_ed_el)
+  JAC_t_ed(t,u_ed,du_ed,v_ed) = jac_t(du_ed,v_ed,dΩ_ed_l) # Lumped
+
+  RES_el(t,u_el,v_el) = 
+    res(t,u_el,v_el,k_el,dΩ_el,dΩ_el_l) -
+      c⁻(t,u_el,v_el,u_ed,dΓ_ed_el) +
+      aᵈ(u_el,v_el,k_el,n_Γ_out,dΓ_out) -
+      bᵈ(u_out,v_el,k_el,n_Γ_out,dΓ_out)
+  RHS_el(t,u_el,v_el) = 
+    rhs(t,u_el,v_el,k_el,dΩ_el) +
+      c⁻(t,u_el,v_el,u_ed,dΓ_ed_el) -
+      aᵈ(u_el,v_el,k_el,n_Γ_out,dΓ_out) +
+      bᵈ(u_out,v_el,k_el,n_Γ_out,dΓ_out)
+  JAC_el(t,u_el,du_el,v_el) = 
+    da(t,u_el,du_el,v_el,k_el,dk_el,dΩ_el) +
+    dc⁻(t,u_el,du_el,v_el,u_ed,dΓ_ed_el) +
+    daᵈ(u_el,du_el,v_el,k_el,dk_el,n_Γ_out,dΓ_out) 
+  JAC_t_el(t,u_el,du_el,v_el) = jac_t(du_el,v_el,dΩ_el_l) # Lumped
 
   # Transient FE Operator and solver
   assem = SparseMatrixAssembler(SparseMatrixCSR{0,PetscScalar,PetscInt},
                                 Vector{PetscScalar},
                                 evaluate(X,nothing),Y)
-  op = TransientFEOperatorFromWeakForm{Nonlinear}(RES,RHS,(JAC,JAC_t),assem,(X,∂t(X)),Y,1)
+  assem_ed = SparseMatrixAssembler(SparseMatrixCSR{0,PetscScalar,PetscInt},
+                                   Vector{PetscScalar},
+                                   evaluate(U_ed,nothing),V_ed)
+  assem_el = SparseMatrixAssembler(SparseMatrixCSR{0,PetscScalar,PetscInt},
+                                   Vector{PetscScalar},
+                                   evaluate(U_el,nothing),V_el)
+
+  op = TransientFEOperatorFromWeakForm{Nonlinear}(
+    RES,RHS,(JAC,JAC_t),assem,(X,∂t(X)),Y,1)
+  op_ed = TransientFEOperatorFromWeakForm{Nonlinear}(
+    RES_ed,RHS_ed,(JAC_ed,JAC_t_ed),assem_ed,(U_ed,∂t(U_ed)),V_ed,1)
+  op_el = TransientFEOperatorFromWeakForm{Nonlinear}(
+    RES_el,RHS_el,(JAC_el,JAC_t_el),assem_el,(U_el,∂t(U_el)),V_el,1)
+  
   nls = PETScNonlinearSolver()
 
   # op = TransientFEOperator(RES,JAC,JAC_t,X,Y)
   # nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-8, iterations=20, linesearch=BackTracking())
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
-  Δt = 0.001 # *(20/n)
+  # Time discretization
+
+  Δt = 0.0005 # *(20/n)
   θ = 0.5
   ode_solver = ThetaMethod(nls,Δt,θ)
 
-  ## Initial conditions
-  u_ed(x) = 0.5 + 0.5 * √( x[1]^2 + x[2]^2 ) / 3.0
-  u_el(x) = u_ed(x)
-
-  uᵢ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  tₑ = 0.005
+  tₑ = 0.01
 
   # Solution, errors and postprocessing
 
@@ -227,8 +290,8 @@ function main(n)
   @time createpvd("results/TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
     pvd[t₀] = createvtk(Ω_P_ed,"results/res_ed_0")
-    writevtk(Ω_P_ed,"results/res_ed_0",cellfields=["uₕₜ"=>uᵢ[1]])
-    writevtk(Ω_P_el,"results/res_el_0",cellfields=["uₕₜ"=>uᵢ[2]])
+    writevtk(Ω_P_ed,"results/res_ed_0",cellfields=["uₕₜ"=>u_ed])
+    writevtk(Ω_P_el,"results/res_el_0",cellfields=["uₕₜ"=>u_el])
     i = 0
     for ti in t₀:Δt:(tₑ-Δt)
       @show ti,ti+Δt
@@ -269,9 +332,10 @@ options = "-snes_type nrichardson
 
 GridapPETSc.with(args=split(options)) do
   # main(20)
+  main(30)
   # main(40)
-  main(80)
-  main(160)
+  # main(80)
+  # main(160)
   # main(320)
   # main(640)
 end

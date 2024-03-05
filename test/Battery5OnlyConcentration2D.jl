@@ -167,7 +167,7 @@ function main(n)
 
   dc(t,u⁺,u⁻,du⁺,du⁻,v⁺,v⁻,dΓ) = ∫( (dg⁺_Γ∘(u⁺,u⁻)*du⁺+dg⁻_Γ∘(u⁺,u⁻)*du⁻)*j(v⁺,v⁻) )dΓ
 
-  γᵈ = 20.0 # ≈ maximum of k_el
+  γᵈ = 25.0 # ≈ maximum of k_el
   u_out = 1.0
 
   aᵈ(u,v,k,n,dΓ) = 
@@ -199,7 +199,7 @@ function main(n)
       bᵈ(u_out,v_el,k_el,n_Γ_out,dΓ_out)
   JAC(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     da(t,u_ed,du_ed,v_ed,k_ed,dk_ed,dΩ_ed) +
-    da(t,u_el,du_el,v_el,k_el,dk_el,dΩ_el) +
+    da(t,u_el,du_el,v_el,k_el,dk_el,dΩ_el) -
     dc(t,u_ed,u_el,du_ed,du_el,v_ed,v_el,dΓ_ed_el) +
     daᵈ(u_el,du_el,v_el,k_el,dk_el,n_Γ_out,dΓ_out) 
   JAC_t(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
@@ -216,8 +216,8 @@ function main(n)
   # nls = NLSolver(show_trace=true, method=:newton, ftol = 1e-8, iterations=20, linesearch=BackTracking())
   # nls = NLSolver(show_trace=true, method=:anderson, m=0, iterations=30)
 
-  Δt = 0.001 # *(20/n)
-  θ = 0.5
+  Δt = 0.01 # *(20/n)
+  θ = 1.0
   ode_solver = ThetaMethod(nls,Δt,θ)
 
   ## Initial conditions
@@ -226,7 +226,7 @@ function main(n)
 
   uᵢ = interpolate_everywhere([u_ed,u_el],X(0.0))
   t₀ = 0.0
-  tₑ = 0.016
+  tₑ = 0.5
 
   # Solution, errors and postprocessing
 
@@ -278,9 +278,9 @@ options = "-snes_type nrichardson
 
 GridapPETSc.with(args=split(options)) do
   # main(20)
-  main(40)
-  # main(80)
-  main(160)
+  # main(40)
+  main(80)
+  # main(160)
   # main(320)
   # main(640)
 end

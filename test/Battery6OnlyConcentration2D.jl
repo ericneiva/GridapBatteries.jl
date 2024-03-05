@@ -128,6 +128,10 @@ function main(n)
           α[4]*exp(-(x-β[4])^2/γ[4])*(β[4]-x)/γ[4] +
           α[5]*exp(-(x-β[5])^2/γ[5])*(β[5]-x)/γ[5] ) )
   
+  # a = 0.0:0.001:1.0
+  # k_ed_a = k_ed.(a)
+  # @show maximum(k_ed_a)
+
   ### Electrolyte
   #### [REF] Eq.(18) doi.org/10.1149/2.0571912jes
   #### Parameters
@@ -136,6 +140,10 @@ function main(n)
   #### Relation
   k_el = x -> (p[1]*exp(p[2]*x)*exp(p[3]/T)*exp(p[4]*x/T)*1.0e-10)/(25e-12) # 25e-12 = (5e-6)^2
   dk_el = x -> k_el(x) * ( p[2] + p[4]/T )
+
+  # b = 0.0:0.001:1.0
+  # k_el_b = k_el.(b)
+  # @show maximum(k_el_b)
 
   ## Source and transmission terms
 
@@ -171,11 +179,11 @@ function main(n)
   dc⁺(t,u⁺,du⁺,v⁺,u⁻,dΓ) = ∫(          dg⁺_Γ∘(u⁺,u⁻)*du⁺ * v⁺   )dΓ
   dc⁻(t,u⁻,du⁻,v⁻,u⁺,dΓ) = ∫( -1.0 * ( dg⁻_Γ∘(u⁺,u⁻)*du⁻ * v⁻ ) )dΓ
 
-  γᵈ = 20.0 # ≈ maximum of k_el
+  γᵈ = 25.0 # ≈ maximum of k_el
   u_out = 1.0
 
   aᵈ(u,v,k,n,dΓ) = 
-    ∫( (γᵈ/h)*u*v  - (k∘u)*(n⋅∇(u))*v - (k∘v)*(n⋅∇(v))*u )dΓ
+    ∫( (γᵈ/h)*u*v - (k∘u)*(n⋅∇(u))*v - (k∘v)*(n⋅∇(v))*u )dΓ
   bᵈ(uᵈ,v,k,n,dΓ) = ∫( (γᵈ/h)*uᵈ*v - (k∘v)*(n⋅∇(v))*uᵈ )dΓ
 
   daᵈ(u,du,v,k,dk,n,dΓ) = ∫( (γᵈ/h)*du*v - 
@@ -203,7 +211,7 @@ function main(n)
       bᵈ(u_out,v_el,k_el,n_Γ_out,dΓ_out)
   JAC(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
     da(t,u_ed,du_ed,v_ed,k_ed,dk_ed,dΩ_ed) +
-    da(t,u_el,du_el,v_el,k_el,dk_el,dΩ_el) +
+    da(t,u_el,du_el,v_el,k_el,dk_el,dΩ_el) -
     dc(t,u_ed,u_el,du_ed,du_el,v_ed,v_el,dΓ_ed_el) +
     daᵈ(u_el,du_el,v_el,k_el,dk_el,n_Γ_out,dΓ_out) 
   JAC_t(t,(u_ed,u_el),(du_ed,du_el),(v_ed,v_el)) = 
@@ -227,7 +235,7 @@ function main(n)
     rhs(t,u_ed,v_ed,k_ed,dΩ_ed) +
       c⁺(t,u_ed,v_ed,u_el,dΓ_ed_el)
   JAC_ed(t,u_ed,du_ed,v_ed) = 
-    da(t,u_ed,du_ed,v_ed,k_ed,dk_ed,dΩ_ed) +
+    da(t,u_ed,du_ed,v_ed,k_ed,dk_ed,dΩ_ed) -
     dc⁺(t,u_ed,du_ed,v_ed,u_el,dΓ_ed_el)
   JAC_t_ed(t,u_ed,du_ed,v_ed) = jac_t(du_ed,v_ed,dΩ_ed_l) # Lumped
 
@@ -242,7 +250,7 @@ function main(n)
       aᵈ(u_el,v_el,k_el,n_Γ_out,dΓ_out) +
       bᵈ(u_out,v_el,k_el,n_Γ_out,dΓ_out)
   JAC_el(t,u_el,du_el,v_el) = 
-    da(t,u_el,du_el,v_el,k_el,dk_el,dΩ_el) +
+    da(t,u_el,du_el,v_el,k_el,dk_el,dΩ_el) -
     dc⁻(t,u_el,du_el,v_el,u_ed,dΓ_ed_el) +
     daᵈ(u_el,du_el,v_el,k_el,dk_el,n_Γ_out,dΓ_out) 
   JAC_t_el(t,u_el,du_el,v_el) = jac_t(du_el,v_el,dΩ_el_l) # Lumped
@@ -273,14 +281,14 @@ function main(n)
 
   # Time discretization
   
-  Δtᵒ = 0.1 # *(20/n)
-  Δtⁱ = Δtᵒ/20
+  Δtᵒ = 0.01 # *(20/n)
+  Δtⁱ = Δtᵒ  # /20
   θ = 1.0
   ode_solver_ed = ThetaMethod(nls,Δtᵒ,θ)
   ode_solver_el = ThetaMethod(nls,Δtⁱ,θ)
 
   t₀ = 0.0
-  tₑ = 2.0
+  tₑ = 0.5
 
   # Solution, errors and postprocessing
 
@@ -288,14 +296,14 @@ function main(n)
   h1(u,k,dΩ) = ∑( ∫( (k∘u)*(∇(u)⋅∇(u)) )dΩ )
 
   tol = 1.0e-6
-  @assert Δtⁱ > 10.0*tol
+  @assert Δtⁱ > 10.0 * tol
 
   @time createpvd("results/TransientPoissonAgFEM") do pvd
     ul2 = 0.0; uh1 = 0.0
-    pvd[t₀] = createvtk(Ω_P_ed,"results/res_ed_0")
-    writevtk(Ω_P_ed,"results/res_ed_0",cellfields=["uₕₜ"=>u_ed])
-    writevtk(Ω_P_el,"results/res_el_0",cellfields=["uₕₜ"=>u_el])
     i = 0
+    pvd[t₀] = createvtk(Ω_P_ed,"results/res_s_ed_$i")
+    writevtk(Ω_P_ed,"results/res_s_ed_$i",cellfields=["uₕₜ"=>u_ed])
+    writevtk(Ω_P_el,"results/res_s_el_$i",cellfields=["uₕₜ"=>u_el])
     tᵒ = t₀
     while tᵒ < tₑ-tol
       @show tᵒ,tᵒ+Δtᵒ
@@ -309,7 +317,7 @@ function main(n)
         end
         tⁱ = tⁱ+Δtⁱ
       end
-      writevtk(Ω_P_el,"results/res_el_$i",cellfields=["uₕₜ"=>u_el])
+      writevtk(Ω_P_el,"results/res_s_el_$i",cellfields=["uₕₜ"=>u_el])
       ul2 = ul2 + l2(u_el,dΩ_el)
       uh1 = uh1 + h1(u_el,k_el,dΩ_el)
       @show "END time integrate electrolyte"
@@ -317,8 +325,8 @@ function main(n)
       uₕₜ_ed = solve(ode_solver_ed,op_ed,u_ed,tᵒ,tᵒ+Δtᵒ)
       for (_u_ed,t) in uₕₜ_ed
         u_ed = _u_ed
-        pvd[t] = createvtk(Ω_P_ed,"results/res_ed_$i")
-        writevtk(Ω_P_ed,"results/res_ed_$i",cellfields=["uₕₜ"=>u_ed])
+        pvd[t] = createvtk(Ω_P_ed,"results/res_s_ed_$i")
+        writevtk(Ω_P_ed,"results/res_s_ed_$i",cellfields=["uₕₜ"=>u_ed])
         ul2 = ul2 + l2(u_ed,dΩ_ed)
         uh1 = uh1 + h1(u_ed,k_ed,dΩ_ed)
       end
@@ -350,8 +358,8 @@ options = "-snes_type nrichardson
 
 GridapPETSc.with(args=split(options)) do
   # main(20)
-  main(40)
-  # main(80)
+  # main(40)
+  main(80)
   # main(160)
   # main(320)
   # main(640)

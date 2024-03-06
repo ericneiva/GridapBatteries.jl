@@ -88,7 +88,7 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
                 * smooth_max(1 - c_s_surf / c_s_max)
             )
             ** (1 / 2)
-            / D_e(smooth_max(c_e_surf))
+            / D_e(smooth_max(c_e_surf)) 
         )
         self.boundary_conditions = {
             c_s: {"left": (pybamm.Scalar(0), "Neumann"), "right": (rbc_s, "Neumann")},
@@ -149,4 +149,5 @@ class DiffusionOnly(pybamm.models.base_model.BaseModel):
     @property
     def default_solver(self):
         # return pybamm.IDAKLUSolver()
-        return pybamm.CasadiSolver("fast", rtol=1e-6, atol=1e-6)
+        return pybamm.ScipySolver()
+        # return pybamm.CasadiSolver("fast", rtol=1e-6, atol=1e-6)
